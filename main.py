@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-环境自动装配小工具 By rgh
+编程开发环境自动装配小工具 By rgh
 ==========================
 
 Copyright (c) 2026 rgh
@@ -90,7 +90,7 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # 全局常量与工具函数
 # ---------------------------------------------------------------------------
-APP_NAME = "环境自动装配小工具 By rgh"
+APP_NAME = "编程开发环境自动装配小工具 By rgh"
 GITHUB_URL = "https://github.com/yourname/env-auto-setup"
 CONFIG_DIR = Path.home() / ".env-tools"
 CONFIG_FILE = CONFIG_DIR / "config.json"

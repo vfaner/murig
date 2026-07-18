@@ -1,4 +1,4 @@
-# 环境自动装配小工具 (env-auto-setup)
+# 编程开发环境自动装配小工具 (env-auto-setup)
 
 <p align="center">
   <img src="assets/env-auto.png" alt="env-auto-setup 主界面截图" width="720"/>

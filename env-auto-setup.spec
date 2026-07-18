@@ -101,8 +101,8 @@ if sys.platform == "darwin":
         # icon=str(SPEC_DIR / "assets" / "icon.icns"),
         bundle_identifier="com.rgh.env-auto-setup",
         info_plist={
-            "CFBundleName": "环境自动装配小工具",
-            "CFBundleDisplayName": "环境自动装配小工具",
+            "CFBundleName": "编程开发环境自动装配小工具",
+            "CFBundleDisplayName": "编程开发环境自动装配小工具",
             "CFBundleShortVersionString": "1.0.0",
             "CFBundleVersion": "1.0.0",
             "NSHighResolutionCapable": True,
