@@ -133,10 +133,13 @@ $RECYCLE.BIN/
 *.tmp
 *.bak
 
-# PyInstaller 打包产物
-*.spec
+# PyInstaller 打包产物（构建目录）
 build/
 dist/
+*.manifest
+
+# PyInstaller 的 .spec 文件：本项目**要提交** env-auto-setup.spec，
+# 只忽略其他偶发生成的 spec 文件
 
 # 本地密钥 / 敏感配置
 .env.local
