@@ -27,10 +27,10 @@
 
 | 系统 | 下载文件 | 说明 |
 |------|----------|------|
-| 🪟 **Windows** | `env-auto-setup.exe` | 双击运行，无需安装 |
-| 🍎 **macOS (Apple Silicon)** | `env-auto-setup-macos-arm64.zip` | 解压后双击 `env-auto-setup.app` |
-| 🍎 **macOS (Intel)** | `env-auto-setup-macos.zip` | 解压后双击 `env-auto-setup.app` |
-| 🐧 **Linux (x64)** | `env-auto-setup-linux-x64` | `chmod +x` 后直接运行 |
+| 🪟 **Windows** | [`env-auto-setup.exe`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup.exe) | 双击运行，无需安装 |
+| 🍎 **macOS (Apple Silicon)** | [`env-auto-setup-macos-arm64.zip`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup-macos-arm64.zip) | 解压后双击 `env-auto-setup.app` |
+| 🍎 **macOS (通用)** | [`env-auto-setup-macos.zip`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup-macos.zip) | 解压后双击 `env-auto-setup.app` |
+| 🐧 **Linux (x64)** | [`env-auto-setup-linux-x64`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup-linux-x64) | `chmod +x` 后直接运行 |
 
 ### 首次启动提示
 
