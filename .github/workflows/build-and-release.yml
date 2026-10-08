@@ -18,17 +18,17 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: murig-windows-x64
-            executable: murig.exe
-            asset_pattern: murig.exe
-          - os: macos-latest
-            artifact_name: murig-macos
-            executable: murig.app
-            asset_pattern: murig-macos.zip
+            kind: windows
+            asset: murig.exe
+          - os: macos-26
+            kind: macos
+            asset: murig-macos-arm64.zip
+          - os: macos-26-intel
+            kind: macos
+            asset: murig-macos-x64.zip
           - os: ubuntu-latest
-            artifact_name: murig-linux-x64
-            executable: murig
-            asset_pattern: murig-linux-x64
+            kind: linux
+            asset: murig-linux-x64
 
     steps:
       - name: Checkout code
@@ -40,7 +40,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install system deps (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.kind == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -55,38 +55,52 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build (Windows / Linux)
-        if: matrix.os != 'macos-latest'
+      - name: Build
         run: |
           pyinstaller murig.spec --noconfirm --clean
 
-      - name: Build (macOS)
-        if: matrix.os == 'macos-latest'
+      - name: Pack macOS app
+        if: matrix.kind == 'macos'
         run: |
-          pyinstaller murig.spec --noconfirm --clean
-          # 打成 zip，保留 .app 结构和权限
           cd dist
-          zip -ry murig-macos.zip murig.app
+          zip -ry ${{ matrix.asset }} murig.app
 
       - name: Rename Linux binary
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.kind == 'linux'
         run: |
           mv dist/murig dist/murig-linux-x64
           chmod +x dist/murig-linux-x64
 
-      - name: Upload artifact (for debugging when workflow_dispatch)
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: ${{ matrix.asset }}
           path: |
-            dist/${{ matrix.asset_pattern }}
+            dist/${{ matrix.asset }}
           if-no-files-found: error
 
-      - name: Upload to Release
-        if: startsWith(github.ref, 'refs/tags/v')
+  release:
+    name: Publish GitHub Release
+    needs: build
+    # 仅打 tag 时发布；workflow_dispatch 只构建供调试下载
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          # 每个产物目录名即 asset 名，pattern 展平后直接位于 release-assets 下
+          merge-multiple: true
+
+      - name: Create release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ matrix.asset_pattern }}
+          files: |
+            release-assets/murig.exe
+            release-assets/murig-macos-arm64.zip
+            release-assets/murig-macos-x64.zip
+            release-assets/murig-linux-x64
           generate_release_notes: true
           draft: false
           prerelease: false
