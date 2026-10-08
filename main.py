@@ -7,7 +7,13 @@ Copyright (c) 2026 rgh
 Licensed under the MIT License. See LICENSE file (or the README) for details.
 
 一个基于 PySide6 的跨平台桌面 GUI 工具，用于自动下载、解压并配置常用开发环境组件：
-JDK、Maven、Tomcat、MySQL、Python、Node.js。
+JDK、Maven、Tomcat、MySQL、MariaDB、PostgreSQL、Redis、Elasticsearch、Python、Miniconda、
+Node.js、Git、Hadoop、ZooKeeper、Hive、HBase、Spark、Flink、Kafka、Ollama、Claude Code、
+CC-Switch、openGauss、达梦 DM8、OceanBase、SQL Server、TiDB、人大金仓 KingbaseES、
+崖山 YashanDB。
+
+组件按 Java / Python / 前端 / 数据库 / 大数据 / AI 六大类组织，支持按软件名、
+别名或分类名模糊搜索。
 
 用法：
     python main.py
@@ -26,8 +32,9 @@ import tarfile
 import traceback
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -91,9 +98,25 @@ except ImportError:  # pragma: no cover
 # 全局常量与工具函数
 # ---------------------------------------------------------------------------
 APP_NAME = "编程开发环境自动装配小工具 By rgh"
-GITHUB_URL = "https://github.com/yourname/env-auto-setup"
+APP_VERSION = "v1.0.1"
 CONFIG_DIR = Path.home() / ".env-tools"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+
+# ---------------------------------------------------------------------------
+# 组件分类
+# ---------------------------------------------------------------------------
+# key -> 分类显示名；"all" 只用于筛选栏
+CATEGORIES: Dict[str, str] = {
+    "all": "全部",
+    "java": "Java 相关",
+    "python": "Python 相关",
+    "frontend": "前端相关",
+    "database": "数据库",
+    "bigdata": "大数据",
+    "ai": "AI 相关",
+}
+# 卡片排列顺序（不含 "all"）
+CATEGORY_ORDER: List[str] = ["java", "python", "frontend", "database", "bigdata", "ai"]
 
 # 当前操作系统标识：'Windows' / 'Darwin' / 'Linux'
 CURRENT_OS = platform.system()
@@ -125,7 +148,9 @@ class ComponentVersion:
 
     version: str
     url_map: Dict[str, str]  # {"Windows": url, "Darwin": url, "Linux": url}
-    archive_map: Dict[str, str] = field(default_factory=dict)  # 归档类型：zip / tar.gz
+    archive_map: Dict[str, str] = field(default_factory=dict)  # 归档类型：zip / tar.gz / tar / rpm
+    # 下拉框展示文案（为空则展示 version）；version 仍作为唯一标识使用
+    display_label: Optional[str] = None
 
     def url_for_current(self) -> Optional[str]:
         return self.url_map.get(CURRENT_OS)
@@ -138,7 +163,12 @@ class ComponentVersion:
             return "zip"
         if url.endswith(".tar.gz") or url.endswith(".tgz"):
             return "tar.gz"
-        return "zip"
+        if url.endswith(".rpm"):
+            return "rpm"
+        if url.endswith(".tar"):
+            return "tar"
+        # AppImage / 无归档后缀的独立可执行文件 → 直接下载使用
+        return "bin"
 
 
 @dataclass
@@ -156,6 +186,25 @@ class Component:
     installer_mode: bool = False
     # 安装器静默安装参数：按 CURRENT_OS 键取。执行时会附加安装目标目录参数
     installer_args: Dict[str, List[str]] = field(default_factory=dict)
+    # 所属分类 key（见 CATEGORIES）
+    category: str = "java"
+    # 搜索别名（缩写 / 俗称），模糊搜索时一并参与匹配
+    aliases: List[str] = field(default_factory=list)
+    # 解压后需要在安装目录内依次执行的命令（如 Redis 源码执行 make 编译）
+    after_extract: Optional[List[List[str]]] = None
+    # 可执行文件可能所在的额外子目录（探测 / 配置 PATH 用），"" 表示安装根目录
+    extra_bin_dirs: List[str] = field(default_factory=list)
+    # npm 包名（如 "@anthropic-ai/claude-code"）：设置后不走下载，直接用本机 npm 便携安装
+    npm_package: Optional[str] = None
+    # 安装完成后展示给用户的额外操作提示（如达梦：请挂载 ISO 运行安装器）
+    post_notes: List[str] = field(default_factory=list)
+    # archive_map 为 "bin"（独立可执行文件）时，下载后统一重命名成的名字（方便 PATH 查找）
+    raw_bin_name: Optional[str] = None
+    # 下载时附加的自定义请求头（如 Kingbase OSS 需要 Referer 才能通过防盗链校验）
+    download_headers: Dict[str, str] = field(default_factory=dict)
+    # PATH / XXX_HOME 都找不到时，再扫的标准安装路径（支持 glob 通配，如
+    # "C:/Program Files/MySQL/MySQL Server *"；macOS 官方 pkg 的 /usr/local/mysql）
+    well_known_homes: List[str] = field(default_factory=list)
 
     def install_dir(self, version: str) -> Path:
         """返回该版本组件的解压安装目录。"""
@@ -165,13 +214,20 @@ class Component:
         """在给定 XXX_HOME 目录下查找可执行文件。"""
         if not self.exec_name:
             return None
-        exe = self.exec_name + (".exe" if CURRENT_OS == "Windows" else "")
-        # 依次尝试 path_subdir、bin、Scripts、根目录
-        candidates_dir = [self.path_subdir, "bin", "Scripts", "condabin", ""]
-        for sub in candidates_dir:
-            cand = Path(home) / sub / exe if sub else Path(home) / exe
-            if cand.exists():
-                return cand
+        # Windows 下 npm/.bin 这类目录里可执行文件可能是 .cmd / .bat 而非 .exe
+        exe_names = [self.exec_name + s for s in (
+            (".exe", ".cmd", ".bat") if CURRENT_OS == "Windows" else ("",)
+        )]
+        # 依次尝试 path_subdir、extra_bin_dirs、常见默认目录与根目录（去重保序）
+        candidate_dirs: List[str] = []
+        for sub in [self.path_subdir, *self.extra_bin_dirs, "bin", "Scripts", "condabin", ""]:
+            if sub not in candidate_dirs:
+                candidate_dirs.append(sub)
+        for sub in candidate_dirs:
+            for exe in exe_names:
+                cand = Path(home) / sub / exe if sub else Path(home) / exe
+                if cand.exists():
+                    return cand
         return None
 
     def detect(self) -> "DetectResult":
@@ -204,6 +260,20 @@ class Component:
                 version_text=_probe_version(which, self.version_args),
             )
 
+        # 3) 扫描官方安装器常用的标准路径（如 macOS 官方 pkg 的 /usr/local/mysql）
+        import glob as _glob
+        for raw in self.well_known_homes:
+            for home in sorted(_glob.glob(raw)):
+                exe = self.exec_path_in_home(home)
+                if exe is not None:
+                    return DetectResult(
+                        installed=True,
+                        source="标准安装路径",
+                        home=home,
+                        exe_path=str(exe),
+                        version_text=_probe_version(str(exe), self.version_args),
+                    )
+
         return DetectResult(False)
 
 
@@ -225,7 +295,7 @@ def _probe_version(exe: str, args: List[str]) -> str:
             [exe, *args],
             capture_output=True,
             text=True,
-            timeout=4,
+            timeout=8,
             check=False,
         )
         out = (proc.stdout or "") + (proc.stderr or "")
@@ -274,15 +344,46 @@ def _tomcat_urls(v: str) -> Dict[str, str]:
     return {"Windows": f"{base}.zip", "Darwin": f"{base}.tar.gz", "Linux": f"{base}.tar.gz"}
 
 
+def _mysql_macos_tag(v: str) -> str:
+    """MySQL macOS 包的系统标签：新版本改打 Sequoia(15)，旧版本是 Sonoma(14)。
+
+    实测边界：9.x 全系 macos15；8.4 ≥ 8.4.5、8.0 ≥ 8.0.41 为 macos15，其余 macos14。
+    """
+    try:
+        tup = tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return "macos14"
+    if tup[0] >= 9:
+        return "macos15"
+    if tup[:2] == (8, 4) and tup >= (8, 4, 5):
+        return "macos15"
+    if tup[:2] == (8, 0) and tup >= (8, 0, 41):
+        return "macos15"
+    return "macos14"
+
+
 def _mysql_urls(v: str) -> Dict[str, str]:
     major_minor = v.rsplit(".", 1)[0]
     win = f"https://dev.mysql.com/get/Downloads/MySQL-{major_minor}/mysql-{v}-winx64.zip"
+    macos_tag = _mysql_macos_tag(v)
     if IS_ARM and CURRENT_OS == "Darwin":
-        mac = f"https://dev.mysql.com/get/Downloads/MySQL-{major_minor}/mysql-{v}-macos14-arm64.tar.gz"
+        mac = f"https://dev.mysql.com/get/Downloads/MySQL-{major_minor}/mysql-{v}-{macos_tag}-arm64.tar.gz"
     else:
-        mac = f"https://dev.mysql.com/get/Downloads/MySQL-{major_minor}/mysql-{v}-macos14-x86_64.tar.gz"
+        mac = f"https://dev.mysql.com/get/Downloads/MySQL-{major_minor}/mysql-{v}-{macos_tag}-x86_64.tar.gz"
     linux = f"https://dev.mysql.com/get/Downloads/MySQL-{major_minor}/mysql-{v}-linux-glibc2.28-x86_64.tar.xz"
     return {"Windows": win, "Darwin": mac, "Linux": linux}
+
+
+def _mariadb_urls(v: str) -> Dict[str, str]:
+    """MariaDB 官方 archive 免登录直链：Linux systemd bintar（仅 x86_64）+ Windows x64 zip。"""
+    root = f"https://archive.mariadb.org/mariadb-{v}"
+    win = f"{root}/winx64-packages/mariadb-{v}-winx64.zip"
+    # 官方 archive 无 aarch64 bintar；Linux ARM 请用发行版仓库
+    linux = (
+        f"{root}/bintar-linux-systemd-x86_64/mariadb-{v}-linux-systemd-x86_64.tar.gz"
+        if not IS_ARM else ""
+    )
+    return {"Windows": win, "Darwin": "", "Linux": linux}
 
 
 def _python_urls(v: str) -> Dict[str, str]:
@@ -330,6 +431,142 @@ def _conda_urls(v: str) -> Dict[str, str]:
     mac = f"{base}/Miniconda3-{v}-MacOSX-{mac_arch}.sh"
     linux = f"{base}/Miniconda3-{v}-Linux-x86_64.sh"
     return {"Windows": win, "Darwin": mac, "Linux": linux}
+
+
+# ---------------------------------------------------------------------------
+# 数据库 / 大数据 / AI 组件 URL 构造器
+# ---------------------------------------------------------------------------
+_APACHE_ARCHIVE = "https://archive.apache.org/dist"
+# 三平台统一 tar.gz 的归档映射（Windows 自带 tar 也可解压，包内含 .cmd 脚本）
+_TGZ_ARCHIVE: Dict[str, str] = {"Windows": "tar.gz", "Darwin": "tar.gz", "Linux": "tar.gz"}
+
+
+def _tgz_cv(version: str, url_map: Dict[str, str]) -> ComponentVersion:
+    return ComponentVersion(version=version, url_map=url_map, archive_map=dict(_TGZ_ARCHIVE))
+
+
+def _redis_urls(v: str) -> Dict[str, str]:
+    """Redis：Windows 用 redis-windows 社区移植版（msys2 构建）；macOS/Linux 用官方源码包。"""
+    win = (
+        "https://github.com/redis-windows/redis-windows/releases/download/"
+        f"{v}/Redis-{v}-Windows-x64-msys2.zip"
+    )
+    src = f"https://download.redis.io/releases/redis-{v}.tar.gz"
+    return {"Windows": win, "Darwin": src, "Linux": src}
+
+
+def _es_urls(v: str) -> Dict[str, str]:
+    """Elasticsearch 官方分发包（Windows zip / macOS·Linux tar.gz）。"""
+    base = "https://artifacts.elastic.co/downloads/elasticsearch"
+    win = f"{base}/elasticsearch-{v}-windows-x86_64.zip"
+    major = int(v.split(".")[0])
+    # 7.x 没有 arm64 的 macOS 包
+    if IS_ARM and major >= 8:
+        mac = f"{base}/elasticsearch-{v}-darwin-aarch64.tar.gz"
+    else:
+        mac = f"{base}/elasticsearch-{v}-darwin-x86_64.tar.gz"
+    linux = f"{base}/elasticsearch-{v}-linux-x86_64.tar.gz"
+    return {"Windows": win, "Darwin": mac, "Linux": linux}
+
+
+def _ollama_urls(v: str) -> Dict[str, str]:
+    """Ollama GitHub Releases 便携包。
+
+    注意：v0.13.0 起 Linux 包改用 .tar.zst，本工具不内置 zstd 解压，因此只收录
+    v0.12.9 及以前的版本（抓取器同样会过滤）。
+    """
+    base = f"https://github.com/ollama/ollama/releases/download/v{v}"
+    return {
+        "Windows": f"{base}/ollama-windows-amd64.zip",
+        "Darwin": f"{base}/Ollama-darwin.zip",
+        "Linux": f"{base}/ollama-linux-amd64.tgz",
+    }
+
+
+def _hadoop_urls(v: str) -> Dict[str, str]:
+    url = f"{_APACHE_ARCHIVE}/hadoop/common/hadoop-{v}/hadoop-{v}.tar.gz"
+    return {"Windows": url, "Darwin": url, "Linux": url}
+
+
+def _zookeeper_urls(v: str) -> Dict[str, str]:
+    # 官方只发 tar.gz（Windows 解压后使用 bin 下的 .cmd 脚本）
+    url = f"{_APACHE_ARCHIVE}/zookeeper/zookeeper-{v}/apache-zookeeper-{v}-bin.tar.gz"
+    return {"Windows": url, "Darwin": url, "Linux": url}
+
+
+def _hive_urls(v: str) -> Dict[str, str]:
+    url = f"{_APACHE_ARCHIVE}/hive/hive-{v}/apache-hive-{v}-bin.tar.gz"
+    return {"Windows": url, "Darwin": url, "Linux": url}
+
+
+def _hbase_urls(v: str) -> Dict[str, str]:
+    url = f"{_APACHE_ARCHIVE}/hbase/{v}/hbase-{v}-bin.tar.gz"
+    return {"Windows": url, "Darwin": url, "Linux": url}
+
+
+def _spark_urls(v: str) -> Dict[str, str]:
+    url = f"{_APACHE_ARCHIVE}/spark/spark-{v}/spark-{v}-bin-hadoop3.tgz"
+    return {"Windows": url, "Darwin": url, "Linux": url}
+
+
+def _flink_urls(v: str) -> Dict[str, str]:
+    url = f"{_APACHE_ARCHIVE}/flink/flink-{v}/flink-{v}-bin-scala_2.12.tgz"
+    return {"Windows": url, "Darwin": url, "Linux": url}
+
+
+def _kafka_urls(v: str) -> Dict[str, str]:
+    url = f"{_APACHE_ARCHIVE}/kafka/{v}/kafka_2.13-{v}.tgz"
+    return {"Windows": url, "Darwin": url, "Linux": url}
+
+
+# ---------------------------------------------------------------------------
+# AI 工具 / 主流数据库 / 信创数据库 URL 构造器
+# ---------------------------------------------------------------------------
+def _ccswitch_urls(v: str) -> Dict[str, str]:
+    """CC-Switch（farion1231/cc-switch）GitHub Releases。"""
+    base = f"https://github.com/farion1231/cc-switch/releases/download/v{v}"
+    # Windows 便携版按系统架构区分；macOS 包为通用包；Linux AppImage 仅收录 x86_64
+    win_seg = "Windows-arm64-" if (IS_ARM and CURRENT_OS == "Windows") else "Windows-"
+    return {
+        "Windows": f"{base}/CC-Switch-v{v}-{win_seg}Portable.zip",
+        "Darwin": f"{base}/CC-Switch-v{v}-macOS.tar.gz",
+        # AppImage：下载后 chmod +x 直接运行（bin 模式，不解压）
+        "Linux": "" if IS_ARM else f"{base}/CC-Switch-v{v}-Linux-x86_64.AppImage",
+    }
+
+
+def _pg_urls(v: str) -> Dict[str, str]:
+    """PostgreSQL：Win/macOS 用 EDB 免安装二进制 zip；Linux 用官方源码编译。"""
+    return {
+        "Windows": (
+            "https://get.enterprisedb.com/postgresql/"
+            f"postgresql-{v}-1-windows-x64-binaries.zip"
+        ),
+        "Darwin": (
+            "https://get.enterprisedb.com/postgresql/"
+            f"postgresql-{v}-1-osx-binaries.zip"
+        ),
+        "Linux": f"https://ftp.postgresql.org/pub/source/v{v}/postgresql-{v}.tar.gz",
+    }
+
+
+def _opengauss_urls(v: str) -> Dict[str, str]:
+    """openGauss Lite（极简版），仅 Linux；选 CentOS7 包（glibc 2.17，兼容性最好）。"""
+    url = (
+        "https://opengauss.obs.cn-south-1.myhuaweicloud.com/"
+        f"{v}/CentOS7/x86/openGauss-Lite-{v}-CentOS7-x86_64.tar.gz"
+    )
+    return {"Windows": "", "Darwin": "", "Linux": url}
+
+
+def _dameng_default_urls() -> Dict[str, str]:
+    """达梦 DM8 开发版固定链接（2026 年 7-8 月构建，已验证可下；抓取器会刷新成最新月份）。"""
+    base = "https://download.dameng.com/eco/adapter/DM8"
+    return {
+        "Windows": f"{base}/202607/dm8_20260709_x86_win_64.zip",
+        "Linux": f"{base}/202607/dm8_20260710_x86_rh7_64.zip",
+        "Darwin": "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -462,28 +699,76 @@ def fetch_node_versions() -> List[ComponentVersion]:
     return result
 
 
+_MYSQL_PORTABLE_SERIES = {(9, 7), (8, 4), (8, 0), (5, 7)}
+
+
+def _mysql_mac_filename(v: str) -> Optional[str]:
+    """从归档接口取某版本 macOS 当前架构的真实 tar.gz 文件名；失败返回 None。"""
+    arch = "arm64" if IS_ARM else "x86_64"
+    try:
+        html = _get(
+            f"https://downloads.mysql.com/archives/community/?tpl=files&os=33&version={v}",
+            timeout=8,
+        ).text
+        m = _re.search(
+            rf"/archives/get/p/23/file/(mysql-{_re.escape(v)}-macos\d+-{arch}\.tar\.gz)",
+            html,
+        )
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
 def fetch_mysql_versions() -> List[ComponentVersion]:
-    """MySQL 没有公开 API，抓 downloads.mysql.com 的归档索引。失败则用一个较新的固定清单。"""
+    """MySQL 归档页：主页面内嵌版本下拉（含 9.x LTS），解析后取有便携包的系列。
+
+    Windows/Linux 命名规则固定；macOS 标签（macos14/15）随发布日期变化，逐个版本走
+    os=33 归档片段解析真实文件名，失败再按版本号规则回退。
+    """
     versions: List[str] = []
     try:
-        # dev.mysql.com/downloads/mysql/ 有 CSRF 保护；用归档目录作为最佳可及来源
-        for prefix in ("mysql-8.4", "mysql-8.0", "mysql-5.7"):
-            try:
-                html = _get(f"https://downloads.mysql.com/archives/community/?tpl=version&os=src&version={prefix}",
-                            timeout=6).text
-                versions.extend(_re.findall(rf'({prefix}\.\d+)', html))
-            except Exception:
-                continue
+        html = _get("https://downloads.mysql.com/archives/community/", timeout=12).text
+        # <select name="version"> 的选项值；只取有便携 tar/zip 的四个系列
+        msel = _re.search(r'<select name="version".*?</select>', html, _re.S)
+        if msel:
+            for v in _re.findall(r'<option value="(\d+\.\d+\.\d+)"', msel.group(0)):
+                tup = tuple(int(x) for x in v.split("."))
+                if tup[:2] in _MYSQL_PORTABLE_SERIES:
+                    versions.append(v)
     except Exception:
         pass
     if not versions:
         # 保底：一份手工维护的近期列表
         versions = [
-            "8.4.2", "8.4.1", "8.4.0",
-            "8.0.39", "8.0.38", "8.0.37", "8.0.36", "8.0.35", "8.0.34",
-            "5.7.44", "5.7.43", "5.7.42",
+            "9.7.1", "9.7.0",
+            "8.4.10", "8.4.9", "8.4.5",
+            "8.0.45", "8.0.43", "8.0.41", "8.0.37",
+            "5.7.44",
         ]
-    return [_cv(v, _mysql_urls(v)) for v in _sort_semver_desc(versions)]
+
+    # macOS ARM64 没有 5.7 构建，列出来也是死链
+    if CURRENT_OS == "Darwin" and IS_ARM:
+        versions = [v for v in versions if not v.startswith("5.7.")]
+    versions = versions[:12]
+
+    # macOS：并发解析每个版本的真实文件名
+    mac_names: Dict[str, Optional[str]] = {}
+    if CURRENT_OS == "Darwin":
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            for v, name in zip(versions, pool.map(_mysql_mac_filename, versions)):
+                mac_names[v] = name
+
+    result: List[ComponentVersion] = []
+    for v in versions:
+        url_map = _mysql_urls(v)
+        resolved = mac_names.get(v)
+        if resolved:
+            url_map["Darwin"] = (
+                f"https://downloads.mysql.com/archives/get/p/23/file/{resolved}"
+            )
+        result.append(_cv(v, url_map))
+    return result
 
 
 def fetch_git_versions() -> List[ComponentVersion]:
@@ -530,6 +815,348 @@ def fetch_conda_versions() -> List[ComponentVersion]:
     return [make_cv(v) for v in versions[:12]]
 
 
+def fetch_redis_versions() -> List[ComponentVersion]:
+    """扫 download.redis.io 官方发布目录。"""
+    html = _get("https://download.redis.io/releases/").text
+    vs = _re.findall(r'href="redis-(\d+\.\d+\.\d+)\.tar\.gz"', html)
+    if not vs:
+        raise RuntimeError("Redis 版本列表为空")
+    return [_cv(v, _redis_urls(v)) for v in _sort_semver_desc(vs)[:15]]
+
+
+def fetch_es_versions() -> List[ComponentVersion]:
+    """Elasticsearch GitHub Tags（7.x 及以上）。"""
+    data = _get(
+        "https://api.github.com/repos/elastic/elasticsearch/tags?per_page=60"
+    ).json()
+    vs: List[str] = []
+    for t in data:
+        m = _re.fullmatch(r"v?(\d+\.\d+\.\d+)", t.get("name", ""))
+        if m and int(m.group(1).split(".")[0]) >= 7:
+            vs.append(m.group(1))
+    if not vs:
+        raise RuntimeError("Elasticsearch 版本列表为空")
+    return [_cv(v, _es_urls(v)) for v in _sort_semver_desc(vs)[:15]]
+
+
+def fetch_ollama_versions() -> List[ComponentVersion]:
+    """Ollama GitHub Releases；只收录三平台便携包齐全（Linux 仍为 tgz）的版本。"""
+    data = _get(
+        "https://api.github.com/repos/ollama/ollama/releases?per_page=100"
+    ).json()
+    required = {"ollama-windows-amd64.zip", "Ollama-darwin.zip", "ollama-linux-amd64.tgz"}
+    vs: List[str] = []
+    for rel in data:
+        m = _re.fullmatch(r"v(\d+\.\d+\.\d+)", rel.get("tag_name", ""))
+        if not m:
+            continue
+        assets = {a["name"] for a in rel.get("assets", [])}
+        if required <= assets:
+            vs.append(m.group(1))
+    if not vs:
+        raise RuntimeError("Ollama 版本列表为空")
+    return [_tgz_cv(v, _ollama_urls(v)) for v in vs[:12]]
+
+
+def _fetch_apache_listing(listing_url: str, pattern: str) -> List[str]:
+    """通用 Apache 归档目录扫描，返回去重、按版本号降序的列表。"""
+    html = _get(listing_url).text
+    vs = _re.findall(pattern, html)
+    if not vs:
+        raise RuntimeError(f"版本列表为空：{listing_url}")
+    return _sort_semver_desc(set(vs))
+
+
+def fetch_hadoop_versions() -> List[ComponentVersion]:
+    vs = _fetch_apache_listing(
+        f"{_APACHE_ARCHIVE}/hadoop/common/", r'href="hadoop-(\d+\.\d+\.\d+)/"'
+    )
+    return [_tgz_cv(v, _hadoop_urls(v)) for v in vs[:10]]
+
+
+def fetch_zookeeper_versions() -> List[ComponentVersion]:
+    vs = _fetch_apache_listing(
+        f"{_APACHE_ARCHIVE}/zookeeper/", r'href="zookeeper-(\d+\.\d+\.\d+)/"'
+    )
+    return [_tgz_cv(v, _zookeeper_urls(v)) for v in vs[:10]]
+
+
+def fetch_hive_versions() -> List[ComponentVersion]:
+    vs = _fetch_apache_listing(
+        f"{_APACHE_ARCHIVE}/hive/", r'href="hive-(\d+\.\d+\.\d+)/"'
+    )
+    return [_tgz_cv(v, _hive_urls(v)) for v in vs[:10]]
+
+
+def fetch_hbase_versions() -> List[ComponentVersion]:
+    vs = _fetch_apache_listing(
+        f"{_APACHE_ARCHIVE}/hbase/", r'href="(\d+\.\d+\.\d+)/"'
+    )
+    return [_tgz_cv(v, _hbase_urls(v)) for v in vs[:10]]
+
+
+def fetch_spark_versions() -> List[ComponentVersion]:
+    vs = _fetch_apache_listing(
+        f"{_APACHE_ARCHIVE}/spark/", r'href="spark-(\d+\.\d+\.\d+)/"'
+    )
+    return [_tgz_cv(v, _spark_urls(v)) for v in vs[:10]]
+
+
+def fetch_flink_versions() -> List[ComponentVersion]:
+    vs = _fetch_apache_listing(
+        f"{_APACHE_ARCHIVE}/flink/", r'href="flink-(\d+\.\d+\.\d+)/"'
+    )
+    return [_tgz_cv(v, _flink_urls(v)) for v in vs[:10]]
+
+
+def fetch_kafka_versions() -> List[ComponentVersion]:
+    vs = _fetch_apache_listing(
+        f"{_APACHE_ARCHIVE}/kafka/", r'href="(\d+\.\d+\.\d+)/"'
+    )
+    return [_tgz_cv(v, _kafka_urls(v)) for v in vs[:10]]
+
+
+def fetch_claude_code_versions() -> List[ComponentVersion]:
+    """npm registry：@anthropic-ai/claude-code 的稳定版本。"""
+    d = _get("https://registry.npmjs.org/@anthropic-ai/claude-code").json()
+    vs = [v for v in d.get("versions", {}) if _re.fullmatch(r"\d+\.\d+\.\d+", v)]
+    vs.sort(key=lambda v: tuple(int(x) for x in v.split(".")), reverse=True)
+    if not vs:
+        raise RuntimeError("Claude Code 版本列表为空")
+    # 不走 HTTP 下载（url 仅占位）；组件的 npm_package 字段触发 npm 便携安装流程
+    return [
+        ComponentVersion(v, {"Windows": "npm", "Darwin": "npm", "Linux": "npm"})
+        for v in vs[:20]
+    ]
+
+
+def fetch_ccswitch_versions() -> List[ComponentVersion]:
+    """CC-Switch GitHub Releases；要求 Win/macOS/Linux 三件套齐全。"""
+    data = _get(
+        "https://api.github.com/repos/farion1231/cc-switch/releases?per_page=30"
+    ).json()
+    result: List[ComponentVersion] = []
+    for rel in data:
+        m = _re.fullmatch(r"v(\d+\.\d+\.\d+)", rel.get("tag_name", ""))
+        if not m:
+            continue
+        v = m.group(1)
+        assets = {a["name"] for a in rel.get("assets", [])}
+        urls = _ccswitch_urls(v)
+        # 当前系统需要的分发包必须在 assets 里（Linux arm64 无包则跳过该版本）
+        required = {PurePosixPath(urlparse(u).path).name for u in urls.values() if u}
+        if not required <= assets:
+            continue
+        result.append(ComponentVersion(
+            version=v,
+            url_map=_ccswitch_urls(v),
+            archive_map={"Windows": "zip", "Darwin": "tar.gz", "Linux": "bin"},
+        ))
+    if not result:
+        raise RuntimeError("CC-Switch 版本列表为空")
+    return result[:10]
+
+
+def fetch_pg_versions() -> List[ComponentVersion]:
+    """PostgreSQL 版本列表。
+
+    ftp.postgresql.org 与各国内镜像的目录列表节点普遍是陈旧快照，无法取到最新版本，
+    因此维护一份精选版本（各主版本的最新小版本），逐个 HEAD 校验官方源码包确实存在。
+    """
+    curated = ("18.4", "17.9", "16.13", "15.19", "14.24", "13.21")
+    result: List[ComponentVersion] = []
+    for v in curated:
+        url = f"https://ftp.postgresql.org/pub/source/v{v}/postgresql-{v}.tar.gz"
+        try:
+            r = requests.head(
+                url, timeout=10, allow_redirects=True,
+                headers={"User-Agent": "env-auto-setup"},
+            )
+            if r.status_code == 200:
+                result.append(ComponentVersion(
+                    version=v,
+                    url_map=_pg_urls(v),
+                    archive_map={"Windows": "zip", "Darwin": "zip", "Linux": "tar.gz"},
+                ))
+        except Exception:
+            continue
+    if not result:
+        raise RuntimeError("PostgreSQL 版本校验全部失败")
+    return result
+
+
+def fetch_opengauss_versions() -> List[ComponentVersion]:
+    """openGauss Lite：版本列表由官网前端 JS 动态渲染，维护已知版本并逐个 HEAD 校验。"""
+    result: List[ComponentVersion] = []
+    for v in ("7.0.0", "6.0.1", "6.0.0"):
+        url = _opengauss_urls(v)["Linux"]
+        try:
+            r = requests.head(
+                url, timeout=10, allow_redirects=True,
+                headers={"User-Agent": "env-auto-setup"},
+            )
+            if r.status_code == 200:
+                result.append(_tgz_cv(v, _opengauss_urls(v)))
+        except Exception:
+            continue
+    if not result:
+        raise RuntimeError("openGauss 版本列表为空")
+    return result
+
+
+_DAMENG_OS_ID = {"Windows": "7", "Linux": "10"}  # Win_64 / rhel7 x86_64
+_DAMENG_BASE = "https://download.dameng.com"
+
+
+def fetch_dameng_versions() -> List[ComponentVersion]:
+    """达梦生态下载 API：取当前系统最新 DM8 构建包。"""
+    os_id = _DAMENG_OS_ID.get(CURRENT_OS)
+    if not os_id:
+        raise RuntimeError("达梦不支持当前系统")
+    d = _get(
+        f"https://eco.dameng.com/eco-download-server/cpu/os/table/download/32/0/{os_id}"
+    ).json()
+    path = d["result"]["url"]
+    m = _re.search(r"/(20\d{2})(\d{2})/dm8_(\d{8})_", path)
+    label = f"{m.group(1)}.{m.group(2)}.{m.group(3)[6:]}" if m else "latest"
+    url = _DAMENG_BASE + path
+    return [ComponentVersion(
+        version=label,
+        url_map={"Windows": url, "Linux": url, "Darwin": ""},
+        archive_map={"Windows": "zip", "Linux": "zip"},
+    )]
+
+
+def fetch_oceanbase_versions() -> List[ComponentVersion]:
+    """OceanBase CE GitHub Releases：取主服务 el7 x86_64 RPM。"""
+    data = _get(
+        "https://api.github.com/repos/oceanbase/oceanbase/releases?per_page=30"
+    ).json()
+    result: List[ComponentVersion] = []
+    seen: set = set()
+    for rel in data:
+        for a in rel.get("assets", []):
+            m = _re.fullmatch(
+                r"oceanbase-ce-(\d+\.\d+\.\d+\.\d+)-\d+\.el7\.x86_64\.rpm", a["name"]
+            )
+            if not m:
+                continue
+            v = m.group(1)
+            if v in seen:
+                continue
+            seen.add(v)
+            result.append(ComponentVersion(
+                version=v,
+                url_map={"Windows": "", "Darwin": "", "Linux": a["browser_download_url"]},
+                archive_map={"Linux": "rpm"},
+            ))
+    if not result:
+        raise RuntimeError("OceanBase 版本列表为空")
+    return result[:10]
+
+
+def fetch_kingbase_versions() -> List[ComponentVersion]:
+    """人大金仓 KingbaseES 官网 CMS：取免登录的 Linux 便携 server 包（金融版构建）。
+
+    主流 GUI 安装 ISO 需申请，官网另发布免登录的 kingbase-server 便携 tar（bin/lib 标准
+    布局，自带 license.dat）。OSS 开启了 Referer 防盗链，下载时组件会带上 Referer 头。
+    """
+    if CURRENT_OS != "Linux":
+        raise RuntimeError("KingbaseES 便携 server 包仅支持 Linux")
+    resp = requests.post(
+        "https://www.kingbase.com.cn/cebest-cms/basic-content/other-versions-page-list",
+        json={"kesId": 1, "page": 0, "size": 80},
+        timeout=15,
+        headers={"User-Agent": "env-auto-setup"},
+    )
+    resp.raise_for_status()
+    rows = resp.json()["data"]["content"]
+
+    picked: List[tuple] = []
+    seen: set = set()
+    for r in rows:
+        if r.get("operatingSystemName") != "Linux":
+            continue
+        fa = r.get("fileAddress") or ""
+        m = _re.fullmatch(
+            r"kingbase-server-(V\d{3}R\d{3}C\d{3}B\w+)-linux-(x86_64|KunPeng|aarch64)\.tar",
+            fa.rsplit("/", 1)[-1],
+        )
+        if not m:
+            continue
+        build, plat = m.group(1), m.group(2)
+        # 按当前机器架构过滤（ARM 行文件名多为 KunPeng，也有 aarch64）
+        if (plat in ("KunPeng", "aarch64")) != IS_ARM:
+            continue
+        mm = _re.search(r"V(\d{3})R(\d{3})C(\d{3})B\d+PS(\d+)", build)
+        label = (
+            f"V{int(mm.group(1))}R{int(mm.group(2))}C{int(mm.group(3))} PS{int(mm.group(4))}"
+            if mm else build
+        )
+        if label in seen:
+            continue
+        seen.add(label)
+        picked.append((r.get("postTime") or "", ComponentVersion(
+            version=build,
+            display_label=label,
+            url_map={"Windows": "", "Darwin": "", "Linux": fa},
+            archive_map={"Linux": "tar"},
+        )))
+    if not picked:
+        raise RuntimeError("KingbaseES 便携包列表为空")
+    picked.sort(key=lambda t: t[0], reverse=True)
+    return [cv for _, cv in picked[:6]]
+
+
+def fetch_yashandb_versions() -> List[ComponentVersion]:
+    """崖山数据库 YashanDB 官网 API：取企业版 Linux server 包（tar.gz 套内层数据库 tar）。"""
+    if CURRENT_OS != "Linux":
+        raise RuntimeError("YashanDB 仅提供 Linux 安装包")
+    resp = requests.post(
+        "https://www.yashandb.com/yashan-server/api/portal/software/findByCondition",
+        json={"current": 1, "size": 30},
+        timeout=15,
+        headers={"User-Agent": "env-auto-setup"},
+    )
+    resp.raise_for_status()
+    rows = resp.json()["data"]["data"]
+
+    picked: List[tuple] = []
+    seen: set = set()
+    for r in rows:
+        if r.get("productName") != "YashanDB 企业版":
+            continue
+        raw = r.get("downloadUrl")
+        if not raw:
+            continue
+        du = json.loads(raw)
+        alt = du.get("alt") or ""
+        # 只认 yashandb-<版本>-linux-<架构>.tar.gz；官网文件名可能带 " (2)" 尾缀；
+        # yashandb-image-* 是 Docker 镜像包
+        m = _re.fullmatch(
+            r"yashandb-(\d+\.\d+\.\d+\.\d+)-linux-(x86_64|aarch64)"
+            r"(?:\s*\(\d+\))?\.tar\.gz",
+            alt.strip(),
+        )
+        if not m:
+            continue
+        v, plat = m.group(1), m.group(2)
+        if (plat == "aarch64") != IS_ARM:
+            continue
+        if v in seen:
+            continue
+        seen.add(v)
+        picked.append((r.get("releaseDate") or "", ComponentVersion(
+            version=v,
+            url_map={"Windows": "", "Darwin": "", "Linux": du["url"]},
+            archive_map={"Linux": "tar.gz"},
+        )))
+    if not picked:
+        raise RuntimeError("YashanDB 版本列表为空")
+    picked.sort(key=lambda t: t[0], reverse=True)
+    return [cv for _, cv in picked[:5]]
+
+
 FETCHERS: Dict[str, Callable[[], List[ComponentVersion]]] = {
     "jdk": fetch_jdk_versions,
     "maven": fetch_maven_versions,
@@ -539,6 +1166,24 @@ FETCHERS: Dict[str, Callable[[], List[ComponentVersion]]] = {
     "mysql": fetch_mysql_versions,
     "git": fetch_git_versions,
     "conda": fetch_conda_versions,
+    "redis": fetch_redis_versions,
+    "elasticsearch": fetch_es_versions,
+    "ollama": fetch_ollama_versions,
+    "hadoop": fetch_hadoop_versions,
+    "zookeeper": fetch_zookeeper_versions,
+    "hive": fetch_hive_versions,
+    "hbase": fetch_hbase_versions,
+    "spark": fetch_spark_versions,
+    "flink": fetch_flink_versions,
+    "kafka": fetch_kafka_versions,
+    "claude-code": fetch_claude_code_versions,
+    "cc-switch": fetch_ccswitch_versions,
+    "postgresql": fetch_pg_versions,
+    "opengauss": fetch_opengauss_versions,
+    "dameng": fetch_dameng_versions,
+    "oceanbase": fetch_oceanbase_versions,
+    "kingbase": fetch_kingbase_versions,
+    "yashandb": fetch_yashandb_versions,
 }
 
 
@@ -584,6 +1229,8 @@ def build_components() -> List[Component]:
                 )
                 for v in ("21", "17", "11", "8")
             ],
+            category="java",
+            aliases=["java", "temurin", "jre"],
         )
     )
 
@@ -597,6 +1244,7 @@ def build_components() -> List[Component]:
             exec_name="mvn",
             version_args=["-v"],
             versions=[_cv(v, _maven_urls(v)) for v in ("3.9.6", "3.9.5", "3.8.8", "3.6.3")],
+            category="java",
         )
     )
 
@@ -610,6 +1258,7 @@ def build_components() -> List[Component]:
             exec_name="catalina",
             version_args=["version"],
             versions=[_cv(v, _tomcat_urls(v)) for v in ("10.1.24", "9.0.89", "8.5.100")],
+            category="java",
         )
     )
 
@@ -622,7 +1271,22 @@ def build_components() -> List[Component]:
             path_subdir="bin",
             exec_name="mysql",
             version_args=["--version"],
-            versions=[_cv(v, _mysql_urls(v)) for v in ("8.0.37", "8.0.36", "5.7.44")],
+            # macOS ARM64 无 5.7 构建，默认列表里不放死链
+            versions=[_cv(v, _mysql_urls(v)) for v in (
+                ("9.7.1", "8.4.10", "8.0.45", "8.0.37")
+                if CURRENT_OS == "Darwin" and IS_ARM
+                else ("9.7.1", "8.4.10", "8.0.45", "8.0.37", "5.7.44")
+            )],
+            category="database",
+            well_known_homes=[
+                # macOS 官方 pkg（/usr/local/mysql 是版本目录的符号链接）
+                "/usr/local/mysql",
+                "/opt/homebrew/opt/mysql",
+                "/usr/local/opt/mysql",
+                # Windows MySQL Installer / MSI
+                "C:/Program Files/MySQL/MySQL Server *",
+                "C:/Program Files (x86)/MySQL/MySQL Server *",
+            ],
         )
     )
 
@@ -636,6 +1300,7 @@ def build_components() -> List[Component]:
             exec_name="python3" if CURRENT_OS != "Windows" else "python",
             version_args=["--version"],
             versions=[_cv(v, _python_urls(v)) for v in ("3.12.4", "3.11.9", "3.10.14", "3.9.19")],
+            category="python",
         )
     )
 
@@ -649,6 +1314,8 @@ def build_components() -> List[Component]:
             exec_name="node",
             version_args=["--version"],
             versions=[_cv(v, _node_urls(v)) for v in ("20.15.0", "18.20.3", "16.20.2")],
+            category="frontend",
+            aliases=["node", "npm"],
         )
     )
 
@@ -663,6 +1330,7 @@ def build_components() -> List[Component]:
             exec_name="git",
             version_args=["--version"],
             versions=[_cv(v, _git_urls(v)) for v in ("2.45.2", "2.44.0", "2.43.0")],
+            category="frontend",
         )
     )
 
@@ -693,6 +1361,502 @@ def build_components() -> List[Component]:
                 "Darwin": ["-b", "-f", "-p"],
                 "Linux": ["-b", "-f", "-p"],
             },
+            category="python",
+        )
+    )
+
+    # ------------------ Redis ------------------
+    # Windows 走 redis-windows 移植版 zip；macOS/Linux 为官方源码包，解压后自动 make 编译
+    components.append(
+        Component(
+            key="redis",
+            display_name="Redis",
+            env_var="REDIS_HOME",
+            path_subdir="bin",
+            exec_name="redis-server",
+            version_args=["--version"],
+            versions=[_cv(v, _redis_urls(v)) for v in ("8.4.7", "7.4.11", "7.2.16", "6.2.24")],
+            category="database",
+            aliases=["缓存", "cache"],
+            # 源码包需要编译；产物在 src/ 目录
+            after_extract=[["make", "-j4"]] if CURRENT_OS != "Windows" else None,
+            extra_bin_dirs=["src"] if CURRENT_OS != "Windows" else [],
+        )
+    )
+
+    # ------------------ Elasticsearch ------------------
+    components.append(
+        Component(
+            key="elasticsearch",
+            display_name="Elasticsearch",
+            env_var="ES_HOME",
+            path_subdir="bin",
+            exec_name="elasticsearch",
+            version_args=["--version"],
+            versions=[_cv(v, _es_urls(v)) for v in ("8.15.2", "7.17.24")],
+            category="database",
+            aliases=["es", "搜索引擎"],
+        )
+    )
+
+    # ------------------ Ollama ------------------
+    # Linux tgz 解压为 usr/bin/ollama；macOS zip 为 Ollama.app；Windows zip 解压即用
+    components.append(
+        Component(
+            key="ollama",
+            display_name="Ollama",
+            env_var=None,
+            # Linux/Windows：bin/ollama；macOS：Ollama.app/Contents/Resources/ollama
+            path_subdir="bin",
+            exec_name="ollama",
+            version_args=["--version"],
+            versions=[_tgz_cv(v, _ollama_urls(v)) for v in ("0.12.9", "0.3.14")],
+            category="ai",
+            aliases=["大模型", "llm", "本地模型"],
+            extra_bin_dirs=["Contents/Resources", "Contents/MacOS"],
+        )
+    )
+
+    # ------------------ Hadoop ------------------
+    components.append(
+        Component(
+            key="hadoop",
+            display_name="Apache Hadoop",
+            env_var="HADOOP_HOME",
+            path_subdir="bin",
+            exec_name="hadoop",
+            version_args=["version"],
+            versions=[_tgz_cv(v, _hadoop_urls(v)) for v in ("3.5.0", "3.4.3", "3.3.6")],
+            category="bigdata",
+            aliases=["hdfs", "mapreduce"],
+        )
+    )
+
+    # ------------------ ZooKeeper ------------------
+    components.append(
+        Component(
+            key="zookeeper",
+            display_name="Apache ZooKeeper",
+            env_var="ZOOKEEPER_HOME",
+            path_subdir="bin",
+            exec_name="zkServer",
+            version_args=["version"],
+            versions=[_tgz_cv(v, _zookeeper_urls(v)) for v in ("3.9.6", "3.8.4")],
+            category="bigdata",
+            aliases=["zk"],
+        )
+    )
+
+    # ------------------ Hive ------------------
+    components.append(
+        Component(
+            key="hive",
+            display_name="Apache Hive",
+            env_var="HIVE_HOME",
+            path_subdir="bin",
+            # 用 beeline --version 探测（hive CLI 对 --version 的支持不稳定）
+            exec_name="beeline",
+            version_args=["--version"],
+            versions=[_tgz_cv(v, _hive_urls(v)) for v in ("4.2.1", "4.0.1", "3.1.3")],
+            category="bigdata",
+        )
+    )
+
+    # ------------------ HBase ------------------
+    components.append(
+        Component(
+            key="hbase",
+            display_name="Apache HBase",
+            env_var="HBASE_HOME",
+            path_subdir="bin",
+            exec_name="hbase",
+            version_args=["version"],
+            versions=[_tgz_cv(v, _hbase_urls(v)) for v in ("3.0.0", "2.6.7", "2.6.0")],
+            category="bigdata",
+        )
+    )
+
+    # ------------------ Spark ------------------
+    components.append(
+        Component(
+            key="spark",
+            display_name="Apache Spark",
+            env_var="SPARK_HOME",
+            path_subdir="bin",
+            exec_name="spark-submit",
+            version_args=["--version"],
+            versions=[_tgz_cv(v, _spark_urls(v)) for v in ("4.2.0", "4.0.0", "3.5.3")],
+            category="bigdata",
+        )
+    )
+
+    # ------------------ Flink ------------------
+    components.append(
+        Component(
+            key="flink",
+            display_name="Apache Flink",
+            env_var="FLINK_HOME",
+            path_subdir="bin",
+            exec_name="flink",
+            version_args=["--version"],
+            versions=[_tgz_cv(v, _flink_urls(v)) for v in ("2.3.0", "1.20.0", "1.18.1")],
+            category="bigdata",
+        )
+    )
+
+    # ------------------ Kafka ------------------
+    components.append(
+        Component(
+            key="kafka",
+            display_name="Apache Kafka",
+            env_var="KAFKA_HOME",
+            path_subdir="bin",
+            exec_name="kafka-topics",
+            version_args=["--version"],
+            versions=[_tgz_cv(v, _kafka_urls(v)) for v in ("4.3.1", "3.9.0", "3.8.1")],
+            category="bigdata",
+        )
+    )
+
+    # ------------------ Claude Code（AI） ------------------
+    # 通过本机 npm 便携安装到独立目录（前置：已安装 Node.js）
+    components.append(
+        Component(
+            key="claude-code",
+            display_name="Claude Code",
+            env_var="CLAUDE_CODE_HOME",
+            path_subdir="node_modules/.bin",
+            exec_name="claude",
+            version_args=["--version"],
+            versions=[
+                ComponentVersion(v, {"Windows": "npm", "Darwin": "npm", "Linux": "npm"})
+                for v in ("2.1.292", "2.1.291", "2.1.290")
+            ],
+            category="ai",
+            aliases=["claude", "cc", "anthropic"],
+            npm_package="@anthropic-ai/claude-code",
+            extra_bin_dirs=["node_modules/.bin"],
+        )
+    )
+
+    # ------------------ CC-Switch（AI） ------------------
+    # Windows 便携 zip（cc-switch.exe）/ macOS「CC Switch.app」/ Linux AppImage
+    components.append(
+        Component(
+            key="cc-switch",
+            display_name="CC-Switch",
+            env_var=None,
+            path_subdir="",  # Linux AppImage 重命名后放在安装目录根
+            exec_name="cc-switch",
+            version_args=["--version"],
+            versions=[
+                ComponentVersion(
+                    v,
+                    _ccswitch_urls(v),
+                    {"Windows": "zip", "Darwin": "tar.gz", "Linux": "bin"},
+                )
+                for v in ("4.0.4", "4.0.3", "4.0.2")
+            ],
+            category="ai",
+            aliases=["ccswitch", "cc switch", "供应商切换", "镜像源切换"],
+            extra_bin_dirs=["CC Switch.app/Contents/MacOS", ""],
+            raw_bin_name="cc-switch",
+        )
+    )
+
+    # ------------------ PostgreSQL（数据库） ------------------
+    # Win/macOS 用 EDB 免安装 zip；Linux 用官方源码自动编译（不依赖 readline/zlib）
+    pg_after_extract = None
+    if CURRENT_OS == "Linux":
+        pg_after_extract = [
+            ["./configure", "--prefix={home}", "--without-readline", "--without-zlib"],
+            ["make", "-j4"],
+            ["make", "install"],
+        ]
+    components.append(
+        Component(
+            key="postgresql",
+            display_name="PostgreSQL",
+            env_var="PG_HOME",
+            path_subdir="bin",
+            exec_name="psql",
+            version_args=["--version"],
+            versions=[
+                ComponentVersion(
+                    v,
+                    _pg_urls(v),
+                    {"Windows": "zip", "Darwin": "zip", "Linux": "tar.gz"},
+                )
+                for v in ("18.4", "17.9", "16.13")
+            ],
+            category="database",
+            aliases=["pg", "postgres", "postgre"],
+            # Linux 源码 make install 后 bin 在根下；Win/macOS EDB 包带一层 pgsql/ 根目录
+            extra_bin_dirs=["pgsql/bin"],
+            after_extract=pg_after_extract,
+            post_notes=[
+                "本工具只完成下载/编译与环境变量配置；初始化数据库请执行 initdb -D <数据目录>，再用 pg_ctl 启动。",
+            ] if CURRENT_OS == "Linux" else [
+                "本工具只完成下载与环境变量配置；初始化数据库请执行 initdb -D <数据目录>，再用 pg_ctl 启动。",
+            ],
+        )
+    )
+
+    # ------------------ openGauss（信创数据库，仅 Linux） ------------------
+    # Lite 外层是 install.sh + .bin 载荷；after_extract 把 .bin（标准 bin/lib 布局）解到安装目录
+    components.append(
+        Component(
+            key="opengauss",
+            display_name="openGauss",
+            env_var="OPENGAUSS_HOME",
+            path_subdir="bin",
+            exec_name="gsql",
+            version_args=["--version"],
+            versions=[_tgz_cv(v, _opengauss_urls(v)) for v in ("7.0.0", "6.0.1", "6.0.0")],
+            category="database",
+            aliases=["高斯", "华为数据库", "gaussdb", "信创"],
+            after_extract=[
+                ["sh", "-c", "tar -zxf openGauss-Lite-*.bin && rm -f openGauss-Lite-*.bin"]
+            ],
+            post_notes=[
+                "解压解包的是程序本体（bin/gsql 等）；如需初始化单机实例，可在安装目录外层使用官方 install.sh -R <程序目录> -D <数据目录>。",
+            ],
+        )
+    )
+
+    # ------------------ 达梦 DM8（信创数据库） ------------------
+    # 官方分发包是 zip 套 ISO；本工具完成下载+解出 ISO，安装需挂载后运行镜像内安装器
+    dm_label = "2026.07.09" if CURRENT_OS == "Windows" else "2026.07.10"
+    components.append(
+        Component(
+            key="dameng",
+            display_name="达梦数据库 DM8",
+            env_var=None,
+            path_subdir="",
+            exec_name=None,
+            versions=[
+                ComponentVersion(
+                    dm_label,
+                    _dameng_default_urls(),
+                    {"Windows": "zip", "Linux": "zip"},
+                )
+            ],
+            category="database",
+            aliases=["达梦", "dm", "dameng", "信创"],
+            post_notes=[
+                "解压后得到的是 ISO 镜像：Windows 请双击挂载后运行安装程序；Linux 请 mount -o loop <ISO> 后执行 ./DMInstall.bin -i。",
+                "如需静默安装，可参考达梦官方文档使用 auto_install.xml。",
+            ],
+        )
+    )
+
+    # ------------------ OceanBase（信创数据库，仅 Linux） ------------------
+    ob_default_versions = [
+        (
+            "4.4.2.3",
+            "v4.4.2_CE_BP3",
+            "oceanbase-ce-4.4.2.3-103000052026090811.el7.x86_64.rpm",
+        ),
+        (
+            "4.3.5.6",
+            "v4.3.5_CE_BP6",
+            "oceanbase-ce-4.3.5.6-106000012026040916.el7.x86_64.rpm",
+        ),
+    ]
+    ob_versions: List[ComponentVersion] = []
+    for v, tag, rpm_name in ob_default_versions:
+        url = f"https://github.com/oceanbase/oceanbase/releases/download/{tag}/{rpm_name}"
+        ob_versions.append(ComponentVersion(
+            version=v,
+            url_map={"Windows": "", "Darwin": "", "Linux": url},
+            archive_map={"Linux": "rpm"},
+        ))
+    components.append(
+        Component(
+            key="oceanbase",
+            display_name="OceanBase",
+            env_var="OB_HOME",
+            path_subdir="bin",
+            exec_name="observer",
+            version_args=["-V"],
+            versions=ob_versions,
+            category="database",
+            aliases=["ob", "蚂蚁数据库", "信创"],
+            extra_bin_dirs=["home/admin/oceanbase/bin", "home/admin/oceanbase/lib"],
+            post_notes=[
+                "RPM 已便携解包到 home/admin/oceanbase；observer 启动需配置文件与数据目录，请参照 OceanBase 官方文档。",
+            ],
+        )
+    )
+
+    # ------------------ MariaDB（MySQL 社区分支） ------------------
+    components.append(
+        Component(
+            key="mariadb",
+            display_name="MariaDB",
+            env_var="MARIADB_HOME",
+            path_subdir="bin",
+            exec_name="mariadb",
+            version_args=["--version"],
+            versions=[
+                ComponentVersion(
+                    v,
+                    _mariadb_urls(v),
+                    {"Windows": "zip", "Linux": "tar.gz"},
+                )
+                for v in ("12.3.3", "11.4.13", "10.11.13")
+            ],
+            category="database",
+            aliases=["maria", "mariadb", "mysql分支", "mysql 分支"],
+            post_notes=[
+                "首次使用请初始化数据目录：scripts/mariadb-install-db --datadir=<数据目录>，"
+                "再用 bin/mariadbd-safe 启动（生产环境建议使用包内 systemd 单元）。",
+            ] if CURRENT_OS == "Linux" else [
+                "首次使用请以管理员身份运行 bin\\mariadb-install-db.exe 初始化数据目录；"
+                "启动可执行 bin\\mariadbd.exe，或注册服务：mariadbd.exe --install。",
+            ],
+        )
+    )
+
+    # ------------------ SQL Server 2025 Express（仅 Windows 引导） ------------------
+    # 微软只提供在线引导程序（fwlink，约 4.5MB），无便携包；本工具下载 exe 后请按向导安装
+    components.append(
+        Component(
+            key="sqlserver",
+            display_name="SQL Server 2025 Express",
+            env_var=None,
+            path_subdir="",
+            exec_name=None,
+            versions=[
+                ComponentVersion(
+                    "2025 Express",
+                    {
+                        "Windows": "https://go.microsoft.com/fwlink/p/?linkid=2216019&clcid=0x409",
+                        "Darwin": "",
+                        "Linux": "",
+                    },
+                    {"Windows": "exe"},
+                )
+            ],
+            category="database",
+            aliases=["mssql", "sqlserver", "sql server", "微软数据库"],
+            raw_bin_name="SQL2025-SSEI-Expr.exe",
+            post_notes=[
+                "下载的是在线引导程序 SQL2025-SSEI-Expr.exe：请双击运行，按向导选择安装类型"
+                "（基本 / 自定义 / 仅下载介质），安装包本体在引导过程中在线拉取。",
+                "Linux 与 macOS 请使用 Docker 镜像 mcr.microsoft.com/mssql/server 运行。",
+            ],
+        )
+    )
+
+    # ------------------ TiDB（分布式数据库，仅 Linux） ------------------
+    # tiup-mirrors 直链；tar 内仅一个 tidb-server，学习可用内嵌 unistore 单机启动
+    tidb_arch = "arm64" if IS_ARM else "amd64"
+    components.append(
+        Component(
+            key="tidb",
+            display_name="TiDB",
+            env_var="TIDB_HOME",
+            path_subdir="",
+            exec_name="tidb-server",
+            version_args=["-V"],
+            versions=[
+                ComponentVersion(
+                    v,
+                    {"Windows": "", "Darwin": "",
+                     "Linux": f"https://tiup-mirrors.pingcap.com/tidb-v{v}-linux-{tidb_arch}.tar.gz"},
+                    {"Linux": "tar.gz"},
+                )
+                for v in ("8.5.6", "8.1.2", "7.5.7")
+            ],
+            category="database",
+            aliases=["tidb", "pingcap", "分布式数据库"],
+            post_notes=[
+                "包内仅 tidb-server 一个可执行文件：学习测试可执行 "
+                "tidb-server -P 4000 --store=unistore --path=<数据目录> 启动内嵌存储单机实例。",
+                "生产集群还需 PD、TiKV 等组件（tiup-mirrors 上同名 pd-/tikv- 包），"
+                "建议按官方文档使用 tiup 部署。",
+            ],
+        )
+    )
+
+    # ------------------ 人大金仓 KingbaseES（仅 Linux 便携包） ------------------
+    # 主流 V9R1C10 是需申请的 GUI ISO；官网另发布免登录 kingbase-server 便携 tar（金融版构建，
+    # 自带 license.dat）。OSS Referer 防盗链：组件声明 download_headers 下载时自动带 Referer。
+    kb_oss = "https://kingbase.oss-cn-beijing.aliyuncs.com/upload/KESV9-baseline/Medition/waihuijyzx"
+    kb_default = [
+        (
+            "V009R003C011B0003PS008",
+            "V9R3C11 PS008",
+            f"{kb_oss}/V9R3C11/V009R003C011B0003PS008/"
+            "kingbase-server-V009R003C011B0003PS008-linux-x86_64.tar",
+        ),
+        (
+            "V008R006C008B0015PS008",
+            "V8R6C8 PS008",
+            f"{kb_oss}/V8R6C8B15/V008R006C008B0015PS008/"
+            "kingbase-server-V008R006C008B0015PS008-linux-x86_64.tar",
+        ),
+    ]
+    components.append(
+        Component(
+            key="kingbase",
+            display_name="人大金仓 KingbaseES",
+            env_var="KINGBASE_HOME",
+            path_subdir="bin",
+            exec_name="ksql",
+            version_args=["--version"],
+            versions=[
+                ComponentVersion(
+                    build,
+                    {"Windows": "", "Darwin": "", "Linux": url},
+                    {"Linux": "tar"},
+                    display_label=label,
+                )
+                for build, label, url in kb_default
+            ],
+            category="database",
+            aliases=["金仓", "kingbase", "kingbasees", "kes", "信创"],
+            download_headers={"Referer": "https://www.kingbase.com.cn/"},
+            post_notes=[
+                "tar 解包为标准 bin/lib 布局（bin/ 下自带 license.dat）；初始化："
+                "bin/initdb -D <数据目录> -U system，再 bin/sys_ctl start -D <数据目录> 启动。",
+                "Windows 需使用官网 GUI 安装 ISO（kingbase.com.cn，需申请）。",
+            ],
+        )
+    )
+
+    # ------------------ 崖山 YashanDB（仅 Linux） ------------------
+    # 外层 tar：bin/yasboot + depends/ + install.sh + 内层 database-*.tar.gz
+    yas_default = "23.4.1.109"
+    components.append(
+        Component(
+            key="yashandb",
+            display_name="崖山数据库 YashanDB",
+            env_var="YASHANDB_HOME",
+            path_subdir="bin",
+            exec_name="yasql",
+            version_args=["--version"],
+            versions=[
+                ComponentVersion(
+                    yas_default,
+                    {"Windows": "", "Darwin": "",
+                     "Linux": "https://yashandb-website.oss-cn-shenzhen.aliyuncs.com/"
+                              "2026/03/06/1772763539649-g3Hyashandb-23.4.1.109-linux-x86_64%20(2).tar.gz"},
+                    {"Linux": "tar.gz"},
+                )
+            ],
+            category="database",
+            aliases=["崖山", "yashan", "yashandb", "信创"],
+            after_extract=[
+                ["sh", "-c", "tar -zxf database-*.tar.gz && rm -f database-*.tar.gz"]
+            ],
+            post_notes=[
+                "初始化：在安装目录执行 ./install.sh（等价 yasboot init，交互输入数据目录与口令；"
+                "要求 /proc/sys/kernel/pid_max ≥ 32769）。",
+                "启动：bin/yasboot cluster start -d <数据目录>；连接："
+                "bin/yasql sys/<口令>@127.0.0.1:1688。",
+            ],
         )
     )
 
@@ -710,10 +1874,12 @@ class DownloadWorker(QThread):
     finished_ok = Signal(str)  # 保存的本地文件绝对路径
     finished_fail = Signal(str)  # 错误信息
 
-    def __init__(self, url: str, dest: Path, parent: Optional[QObject] = None) -> None:
+    def __init__(self, url: str, dest: Path, headers: Optional[Dict[str, str]] = None,
+                 parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self.url = url
         self.dest = dest
+        self.headers = headers or None
         self._cancel = False
 
     def cancel(self) -> None:
@@ -723,7 +1889,8 @@ class DownloadWorker(QThread):
         try:
             self.log.emit("info", f"开始下载：{self.url}")
             ensure_dir(self.dest.parent)
-            with requests.get(self.url, stream=True, timeout=30, allow_redirects=True) as r:
+            with requests.get(self.url, stream=True, timeout=30, allow_redirects=True,
+                              headers=self.headers) as r:
                 r.raise_for_status()
                 total = int(r.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -745,6 +1912,65 @@ class DownloadWorker(QThread):
             self.finished_ok.emit(str(self.dest))
         except Exception as exc:  # pragma: no cover
             self.log.emit("error", f"下载失败：{exc}")
+            self.finished_fail.emit(str(exc))
+
+
+class CommandWorker(QThread):
+    """在后台执行外部命令（如 npm 便携安装），并把输出实时转发到日志。"""
+
+    log = Signal(str, str)  # (level, message)
+    finished_ok = Signal(str)
+    finished_fail = Signal(str)
+
+    def __init__(self, cmd: List[str], cwd: Optional[Path] = None,
+                 parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self.cmd = cmd
+        self.cwd = str(cwd) if cwd else None
+        self._proc: Optional[subprocess.Popen] = None
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+        if self._proc is not None and self._proc.poll() is None:
+            try:
+                if CURRENT_OS == "Windows":
+                    self._proc.terminate()
+                else:
+                    import signal
+                    os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
+            except Exception:
+                pass
+
+    def run(self) -> None:  # noqa: D401
+        try:
+            self.log.emit("info", f"执行：{' '.join(self.cmd)}（目录：{self.cwd or os.getcwd()}）")
+            kwargs = dict(
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=self.cwd,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if CURRENT_OS != "Windows":
+                kwargs["start_new_session"] = True
+            self._proc = subprocess.Popen(self.cmd, **kwargs)
+            assert self._proc.stdout is not None
+            for line in self._proc.stdout:
+                text = line.rstrip()
+                if text:
+                    self.log.emit("info", text[:500])
+            code = self._proc.wait()
+            if self._cancel:
+                self.finished_fail.emit("用户取消")
+                return
+            if code != 0:
+                self.finished_fail.emit(f"命令返回非零退出码：{code}")
+                return
+            self.finished_ok.emit("")
+        except Exception as exc:  # pragma: no cover
+            self.log.emit("error", f"命令执行失败：{exc}")
             self.finished_fail.emit(str(exc))
 
 
@@ -870,6 +2096,11 @@ def extract_archive(archive: Path, extract_to: Path) -> Path:
     elif name.endswith(".tar.xz"):
         with tarfile.open(archive, "r:xz") as tf:
             tf.extractall(extract_to)
+    elif name.endswith(".tar"):
+        # 后缀是 .tar 但可能实为 gzip 压缩（KingbaseES 便携包即如此）；
+        # r:* 按魔术字节自动识别压缩格式，真未压缩 tar 也兼容
+        with tarfile.open(archive, "r:*") as tf:
+            tf.extractall(extract_to)
     else:
         raise RuntimeError(f"未知的归档类型：{archive.name}")
 
@@ -877,6 +2108,148 @@ def extract_archive(archive: Path, extract_to: Path) -> Path:
     if len(entries) == 1:
         return entries[0]
     return extract_to
+
+
+def _rpm_header_info(data: bytes):
+    """解析 RPM 的 lead + signature header + immutable header。
+
+    返回 (payload 起始偏移, payload 压缩器, 格式)。仅解析 header 索引区。
+    索引项为 16 字节：tag / type / offset / count。
+    """
+    def one_header(off: int):
+        if data[off:off + 3] != b"\x8e\xad\xe8":
+            raise RuntimeError("不是有效的 RPM 包（header magic 不匹配）")
+        count = int.from_bytes(data[off + 8:off + 12], "big")
+        dbytes = int.from_bytes(data[off + 12:off + 16], "big")
+        tags: Dict[int, tuple] = {}
+        idx = off + 16
+        for _ in range(count):
+            tag, typ, noff, cnt = (
+                int.from_bytes(data[idx:idx + 4], "big"),
+                int.from_bytes(data[idx + 4:idx + 8], "big"),
+                int.from_bytes(data[idx + 8:idx + 12], "big"),
+                int.from_bytes(data[idx + 12:idx + 16], "big"),
+            )
+            tags[tag] = (typ, noff, cnt)
+            idx += 16
+        return tags, idx, dbytes
+
+    # lead 固定 96 字节
+    _sig_tags, sig_store, sig_db = one_header(96)
+    sig_end = sig_store + ((sig_db + 7) // 8 * 8)
+    hdr_tags, hdr_store, hdr_db = one_header(sig_end)
+
+    def header_string(tag: int) -> str:
+        _, off, _ = hdr_tags[tag]
+        end = data.index(b"\x00", hdr_store + off)
+        return data[hdr_store + off:end].decode()
+
+    # immutable store 后直接衔接 payload（尾部不补齐；8 字节对齐只用于两个 header 之间）
+    payload_off = hdr_store + hdr_db
+    return payload_off, header_string(1125), header_string(1124)
+
+
+def extract_rpm(rpm: Path, extract_to: Path) -> Path:
+    """把 RPM（cpio + xz/gzip/zstd）解包到目录，返回 extract_to。
+
+    不依赖系统 rpm2cpio；xz/gzip 走标准库，zstd 需要系统 zstd 命令。
+    """
+    import lzma
+    import gzip
+
+    ensure_dir(extract_to)
+    with open(rpm, "rb") as f:
+        head = f.read(512 * 1024)
+        payload_off, compressor, payload_fmt = _rpm_header_info(head)
+        f.seek(payload_off)
+
+        cpio_tmp = extract_to.parent / f".{rpm.stem}.cpio"
+        with open(cpio_tmp, "wb") as out:
+            if compressor in ("xz", "lzma"):
+                dec = lzma.LZMADecompressor()
+                while True:
+                    chunk = f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(dec.decompress(chunk))
+            elif compressor == "gzip":
+                dec = gzip.GzipFile(fileobj=f)
+                shutil.copyfileobj(dec, out)
+            elif compressor == "zstd":
+                zstd = shutil.which("zstd")
+                if not zstd:
+                    raise RuntimeError("该 RPM 使用 zstd 压缩，请先安装 zstd（brew install zstd / apt install zstd）")
+                proc = subprocess.Popen(
+                    [zstd, "-dc", "-"], stdin=subprocess.PIPE, stdout=out,
+                )
+                try:
+                    shutil.copyfileobj(f, proc.stdin)
+                finally:
+                    if proc.stdin:
+                        proc.stdin.close()
+                if proc.wait() != 0:
+                    raise RuntimeError("zstd 解压失败")
+            else:
+                raise RuntimeError(f"暂不支持的 RPM 压缩格式：{compressor}（payload={payload_fmt}）")
+
+    _extract_cpio_newc(cpio_tmp, extract_to)
+    cpio_tmp.unlink(missing_ok=True)
+    return extract_to
+
+
+def _extract_cpio_newc(cpio_file: Path, dest: Path) -> None:
+    """流式解析 cpio newc（magic 070701/070702）归档并提取文件。"""
+    with open(cpio_file, "rb") as data:
+        while True:
+            h = data.read(110)
+            if len(h) < 110 or h[:6] not in (b"070701", b"070702"):
+                break
+            filesize = int(h[54:62], 16)
+            namesize = int(h[94:102], 16)
+            mode = int(h[14:22], 16)
+            raw_name = data.read(namesize)
+            name = raw_name[:-1].decode("utf-8", "replace")
+            # 头部(110) + 名称整体按 4 字节对齐
+            data.seek((-(110 + namesize)) % 4, 1)
+
+            if name == "TRAILER!!!":
+                break
+            # 规范掉 ./ 与 / 前缀（RPM 内名称常见 "./usr/..."）
+            rel = name
+            while rel.startswith("./"):
+                rel = rel[2:]
+            rel = rel.lstrip("/")
+            ftype = mode & 0o170000
+            target = dest / rel if rel else None
+
+            if target is not None and ftype == 0o040000:  # 目录
+                target.mkdir(parents=True, exist_ok=True)
+                data.seek((-filesize) % 4, 1)
+            elif target is not None and ftype == 0o120000:  # 软链接
+                link = data.read(filesize).decode("utf-8", "replace")
+                data.seek((-filesize) % 4, 1)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.is_symlink() or target.exists():
+                    target.unlink()
+                target.symlink_to(link)
+            elif target is not None and ftype == 0o100000:  # 普通文件
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with open(target, "wb") as out:
+                    remaining = filesize
+                    while remaining > 0:
+                        chunk = data.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        remaining -= len(chunk)
+                try:
+                    target.chmod(mode & 0o777)
+                except OSError:
+                    pass
+                data.seek((-filesize) % 4, 1)
+            else:
+                # 其它类型（设备/fifo 等）跳过数据体
+                data.seek(filesize + ((-filesize) % 4), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1048,6 +2421,7 @@ class ComponentCard(QFrame):
         self.component = component
         self.log_cb = log_cb
         self.worker: Optional[DownloadWorker] = None
+        self.cmd_worker: Optional[CommandWorker] = None
         self._extracted_path: Optional[Path] = None
 
         self.setObjectName("card")
@@ -1103,7 +2477,7 @@ class ComponentCard(QFrame):
 
         mid.addSpacing(8)
 
-        self.btn_install = QPushButton("下载并安装")
+        self.btn_install = QPushButton("安装" if self.component.npm_package else "下载并安装")
         self.btn_install.setObjectName("primaryBtn")
         self.btn_install.setCursor(QCursor(Qt.PointingHandCursor))
         self.btn_install.setFixedHeight(34)
@@ -1234,6 +2608,12 @@ class ComponentCard(QFrame):
     # ------------------------------------------------------------------
     def on_install_clicked(self) -> None:
         cv = self._current_version()
+
+        # npm 便携安装模式（如 Claude Code）：不走下载流程
+        if self.component.npm_package:
+            self._start_npm_install(cv)
+            return
+
         url = cv.url_for_current()
         if not url:
             self._log("error", f"当前系统 {CURRENT_OS} 无可用下载地址。")
@@ -1253,7 +2633,19 @@ class ComponentCard(QFrame):
             suffix = f".{ext}"
         else:
             archive_ext = cv.archive_for_current()
-            suffix = ".zip" if archive_ext == "zip" else ".tar.gz"
+            if archive_ext == "zip":
+                suffix = ".zip"
+            elif archive_ext == "tar.gz":
+                suffix = ".tar.gz"
+            elif archive_ext == "tar":
+                suffix = ".tar"
+            elif archive_ext == "rpm":
+                suffix = ".rpm"
+            elif archive_ext == "exe":
+                suffix = ".exe"
+            else:
+                # 独立可执行文件（如 AppImage）：保留原始后缀，没有则用 .bin
+                suffix = "".join(PurePosixPath(urlparse(url).path).suffixes) or ".bin"
 
         download_dir = CONFIG_DIR / self.component.key / "downloads"
         ensure_dir(download_dir)
@@ -1265,7 +2657,7 @@ class ComponentCard(QFrame):
         self.btn_cancel.setVisible(True)
         self.btn_cancel.setEnabled(True)
 
-        self.worker = DownloadWorker(url, dest)
+        self.worker = DownloadWorker(url, dest, self.component.download_headers)
         self.worker.progress.connect(self._on_progress)
         self.worker.log.connect(self._log)
         self.worker.finished_ok.connect(lambda p: self._on_download_ok(Path(p), cv))
@@ -1302,23 +2694,52 @@ class ComponentCard(QFrame):
                 self._run_installer(path, final)
                 self._log("ok", f"安装完成：{final}")
             else:
-                self._log("info", "开始解压…")
-                # 解压到临时目录
-                tmp_dir = target_root / f".extract-{cv.version}"
-                if tmp_dir.exists():
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                ensure_dir(tmp_dir)
-                root = extract_archive(path, tmp_dir)
+                archive_ext = cv.archive_for_current()
+                if archive_ext == "rpm":
+                    # RPM：纯 Python 解析（xz/lzma + cpio newc），直接解到 final
+                    self._log("info", "开始解包 RPM（cpio）…")
+                    if final.exists():
+                        shutil.rmtree(final, ignore_errors=True)
+                    ensure_dir(final)
+                    extract_rpm(path, final)
+                    self._log("ok", f"解包完成：{final}")
+                elif archive_ext in ("bin", "exe"):
+                    # 独立可执行文件（Linux AppImage / Windows 引导程序 .exe）：放入安装目录
+                    if final.exists():
+                        shutil.rmtree(final, ignore_errors=True)
+                    ensure_dir(final)
+                    raw_name = self.component.raw_bin_name or path.name
+                    raw = final / raw_name
+                    shutil.move(str(path), str(raw))
+                    try:
+                        raw.chmod(0o755)
+                    except OSError:
+                        pass
+                    self._log("ok", f"可执行文件已就绪：{raw}")
+                else:
+                    self._log("info", "开始解压…")
+                    # 解压到临时目录
+                    tmp_dir = target_root / f".extract-{cv.version}"
+                    if tmp_dir.exists():
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                    ensure_dir(tmp_dir)
+                    root = extract_archive(path, tmp_dir)
 
-                if final.exists():
-                    shutil.rmtree(final, ignore_errors=True)
-                shutil.move(str(root), str(final))
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                self._log("ok", f"解压完成：{final}")
+                    if final.exists():
+                        shutil.rmtree(final, ignore_errors=True)
+                    shutil.move(str(root), str(final))
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    self._log("ok", f"解压完成：{final}")
+
+            # 源码类组件的编译步骤（如 Redis 执行 make）
+            if self.component.after_extract:
+                self._run_after_extract(final)
 
             self._extracted_path = final
             # 自动尝试配置环境变量
             self._configure_env(final)
+            for note in self.component.post_notes:
+                self._log("warn", note)
         except Exception as exc:
             self._log("error", f"安装/配置失败：{exc}\n{traceback.format_exc()}")
         finally:
@@ -1354,6 +2775,34 @@ class ComponentCard(QFrame):
             raise RuntimeError(f"安装器返回非零退出码：{proc.returncode}")
 
     # ------------------------------------------------------------------
+    def _run_after_extract(self, home: Path) -> None:
+        """在安装目录内依次执行组件声明的编译/初始化命令（失败只告警，不中断流程）。"""
+        for raw_cmd in self.component.after_extract or []:
+            # 支持 {home} 占位符（如 ./configure --prefix={home}）
+            cmd = [arg.replace("{home}", str(home)) for arg in raw_cmd]
+            self._log("info", f"执行：{' '.join(cmd)}（目录：{home}）")
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=str(home),
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                    check=False,
+                )
+                if proc.stdout:
+                    self._log("info", proc.stdout.strip()[:400])
+                if proc.stderr:
+                    self._log("info", proc.stderr.strip()[:400])
+                if proc.returncode != 0:
+                    self._log(
+                        "warn",
+                        f"命令返回非零退出码 {proc.returncode}，可尝试在 {home} 手动执行。",
+                    )
+            except Exception as exc:
+                self._log("warn", f"命令执行失败：{exc}")
+
+    # ------------------------------------------------------------------
     def _on_download_fail(self, msg: str) -> None:
         self.btn_install.setEnabled(True)
         self.btn_configure.setEnabled(True)
@@ -1365,7 +2814,67 @@ class ComponentCard(QFrame):
             QMessageBox.warning(self, "下载失败", f"{self.component.display_name} 下载失败：\n{msg}")
 
     # ------------------------------------------------------------------
+    def _start_npm_install(self, cv: ComponentVersion) -> None:
+        """使用本机 npm 把包便携安装到独立目录（不污染全局）。"""
+        comp = self.component
+        npm = shutil.which("npm.cmd" if CURRENT_OS == "Windows" else "npm") or shutil.which("npm")
+        if not npm:
+            self._log("error", "未检测到 npm，请先通过本工具安装 Node.js（或自行安装 Node.js）。")
+            return
+        final = comp.install_dir(cv.version)
+        ensure_dir(final)
+        spec = f"{comp.npm_package}@{cv.version}"
+        args = ["install", "--prefix", str(final), "--no-fund", "--no-audit", spec]
+        if CURRENT_OS == "Windows" and npm.lower().endswith((".cmd", ".bat")):
+            # .cmd / .bat 不能被 CreateProcess 直接执行，需要经 cmd /c 调起
+            cmd = ["cmd", "/c", npm, *args]
+        else:
+            cmd = [npm, *args]
+
+        # 忙碌状态（npm 安装无精确进度，进度条滚动）
+        self.progress.setRange(0, 0)
+        self.progress.setFormat("npm 安装中…")
+        self.btn_install.setEnabled(False)
+        self.btn_configure.setEnabled(False)
+        self.btn_cancel.setVisible(True)
+        self.btn_cancel.setEnabled(True)
+
+        self.cmd_worker = CommandWorker(cmd)
+        self.cmd_worker.log.connect(self._log)
+        self.cmd_worker.finished_ok.connect(lambda _: self._on_npm_ok(final))
+        self.cmd_worker.finished_fail.connect(self._on_command_fail)
+        self.cmd_worker.start()
+
+    # ------------------------------------------------------------------
+    def _on_npm_ok(self, final: Path) -> None:
+        self.progress.setRange(0, 100)
+        self.progress.setValue(100)
+        self.progress.setFormat("%p%")
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setVisible(False)
+        self._log("ok", f"npm 安装完成：{final}")
+        self._extracted_path = final
+        self._configure_env(final)
+        self.btn_install.setEnabled(True)
+        self.btn_configure.setEnabled(True)
+        self._detect_status()
+
+    # ------------------------------------------------------------------
+    def _on_command_fail(self, msg: str) -> None:
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setFormat("%p%")
+        self.btn_install.setEnabled(True)
+        self.btn_configure.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setVisible(False)
+        if msg and msg != "用户取消":
+            self._log("error", f"命令执行失败：{msg}")
+
+    # ------------------------------------------------------------------
     def on_cancel_clicked(self) -> None:
+        if self.cmd_worker and self.cmd_worker.isRunning():
+            self.cmd_worker.cancel()
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
 
@@ -1391,6 +2900,10 @@ class ComponentCard(QFrame):
         try:
             comp = self.component
             bin_dir = install_path / comp.path_subdir
+            # 若能在安装目录中找到可执行文件，PATH 以它实际所在目录为准
+            exe = comp.exec_path_in_home(str(install_path))
+            if exe is not None:
+                bin_dir = exe.parent
             if comp.env_var:
                 if CURRENT_OS == "Windows":
                     EnvManager.set_windows_user_env(comp.env_var, str(install_path))
@@ -1431,7 +2944,7 @@ class DonateDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("支持作者")
-        self.setMinimumSize(460, 460)
+        self.setFixedSize(380, 402)
         self.setObjectName("donateDialog")
         self._assets_dir = Path(__file__).parent / "assets"
         self._build_ui()
@@ -1440,24 +2953,24 @@ class DonateDialog(QDialog):
 
     def _build_ui(self) -> None:
         v = QVBoxLayout(self)
-        v.setContentsMargins(20, 20, 20, 20)
-        v.setSpacing(14)
+        v.setContentsMargins(16, 16, 16, 16)
+        v.setSpacing(10)
 
         tip = QLabel("如果本工具对你有所帮助，欢迎请作者一杯咖啡 ☕")
         tip.setAlignment(Qt.AlignCenter)
-        tip.setStyleSheet("font-size:14px;color:#444;")
+        tip.setStyleSheet("font-size:13px;color:#444;")
         v.addWidget(tip)
 
         # 渠道切换按钮行
         row = QHBoxLayout()
-        row.setSpacing(14)
+        row.setSpacing(10)
         self._buttons: List[QPushButton] = []
         for name, color, filename in self.CHANNELS:
             btn = QPushButton(name)
             btn.setCursor(QCursor(Qt.PointingHandCursor))
             btn.setCheckable(True)
             btn.setStyleSheet(
-                f"QPushButton{{background:{color};color:white;border:none;border-radius:8px;padding:10px 20px;font-weight:600;}}"
+                f"QPushButton{{background:{color};color:white;border:none;border-radius:8px;padding:8px 16px;font-weight:600;}}"
                 f"QPushButton:checked{{background:{color};border:2px solid #333;}}"
                 f"QPushButton:hover{{background:{color};}}"
             )
@@ -1469,17 +2982,17 @@ class DonateDialog(QDialog):
         # 当前渠道标签
         self._channel_label = QLabel("")
         self._channel_label.setAlignment(Qt.AlignCenter)
-        self._channel_label.setStyleSheet("font-size:15px;font-weight:600;color:#333;")
+        self._channel_label.setStyleSheet("font-size:14px;font-weight:600;color:#333;")
         v.addWidget(self._channel_label)
 
-        # 二维码展示区
+        # 二维码展示区（固定尺寸，整体弹窗更紧凑）
         self.qr_view = QLabel("请选择下方渠道")
         self.qr_view.setAlignment(Qt.AlignCenter)
-        self.qr_view.setMinimumHeight(260)
+        self.qr_view.setFixedHeight(214)
         self.qr_view.setStyleSheet(
-            "background:#fafafa;border:1px solid #e0e0e0;border-radius:10px;color:#888;padding:10px;"
+            "background:#fafafa;border:1px solid #e0e0e0;border-radius:10px;color:#888;padding:8px;"
         )
-        v.addWidget(self.qr_view, stretch=1)
+        v.addWidget(self.qr_view, alignment=Qt.AlignHCenter)
 
         # 底部备注
         note = QLabel("扫码打赏，感谢您的支持！")
@@ -1510,10 +3023,9 @@ class DonateDialog(QDialog):
         if qr_path.exists():
             pixmap = QPixmap(str(qr_path))
             if not pixmap.isNull():
-                # 按 view 宽度等比缩放
+                # 等比缩小到固定边长，整体弹窗更短更美观
                 scaled = pixmap.scaled(
-                    self.qr_view.width() - 20,
-                    self.qr_view.height() - 20,
+                    196, 196,
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation,
                 )
@@ -1525,6 +3037,212 @@ class DonateDialog(QDialog):
         self.qr_view.setText(
             f"未找到二维码文件：\n\n{qr_path}\n\n请将 {filename} 放入 assets 目录后重启。"
         )
+
+
+# ---------------------------------------------------------------------------
+# 关于我们弹窗
+# ---------------------------------------------------------------------------
+class AboutDialog(QDialog):
+    """关于我们：团队介绍 + QQ/微信群/微信联系方式。"""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("关于我们")
+        self.setMinimumWidth(760)
+        self.setObjectName("aboutDialog")
+        self._build_ui()
+        self.adjustSize()
+
+    def _build_ui(self) -> None:
+        v = QVBoxLayout(self)
+        v.setContentsMargins(36, 28, 36, 24)
+        v.setSpacing(10)
+
+        # ABOUT US 胶囊
+        pill = QLabel("ABOUT US")
+        pill.setAlignment(Qt.AlignCenter)
+        pill.setFixedSize(120, 34)
+        pill.setStyleSheet(
+            "background:#f0effd;color:#6c5ce7;border:1px solid #dcd7f9;"
+            "border-radius:17px;font-weight:700;font-size:13px;"
+        )
+        v.addWidget(pill, alignment=Qt.AlignHCenter)
+
+        title = QLabel("关于我们")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size:30px;font-weight:800;color:#1a1a2e;")
+        v.addWidget(title)
+
+        subtitle = QLabel("一群因为热爱而聚在一起的开源爱好者")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("font-size:15px;color:#8a8a9a;")
+        v.addWidget(subtitle)
+        v.addSpacing(8)
+
+        # 介绍卡片
+        card = QFrame()
+        card.setObjectName("aboutCard")
+        card.setStyleSheet(
+            "#aboutCard{background:#ffffff;border:1px solid #e8e8f0;border-radius:16px;}"
+        )
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(32, 26, 32, 22)
+        cl.setSpacing(14)
+
+        heading = QLabel("我们致力于开源项目")
+        heading.setStyleSheet("font-size:19px;font-weight:700;color:#222;")
+        cl.addWidget(heading)
+
+        p1 = QLabel(
+            "我们是一群开源爱好者，专注于分享实用、开箱即用的小工具，"
+            "希望能帮你在日常工作中少写一点重复代码、少踩一点坑。"
+        )
+        p1.setWordWrap(True)
+        p1.setStyleSheet("font-size:14px;color:#6b6b7b;line-height:1.6;")
+        cl.addWidget(p1)
+
+        # 产品矩阵导流：点击在浏览器打开 nav.qqmu.com
+        p_nav = QLabel(
+            '更多开箱即用的小工具（MuOpt、MuAsk、JArgus、Jync 等），'
+            '欢迎逛逛我们的产品导航：'
+            '<a href="https://nav.qqmu.com" style="color:#5b5bd6;'
+            'text-decoration:none;font-weight:600;">nav.qqmu.com ↗</a>'
+        )
+        p_nav.setWordWrap(True)
+        p_nav.setCursor(QCursor(Qt.PointingHandCursor))
+        p_nav.setStyleSheet("font-size:14px;color:#6b6b7b;line-height:1.6;")
+        p_nav.linkActivated.connect(
+            lambda url: QDesktopServices.openUrl(QUrl(url))
+        )
+        cl.addWidget(p_nav)
+
+        p2 = QLabel(
+            "如果你有更好的建议或想法，想提需求，或者在使用中遇到软件上的问题，"
+            "欢迎随时通过下面的方式联系我们 —— 每一条反馈我们都会认真看："
+        )
+        p2.setWordWrap(True)
+        p2.setStyleSheet("font-size:14px;color:#6b6b7b;line-height:1.6;")
+        cl.addWidget(p2)
+
+        # 联系方式 2x2（两行水平布局）
+        def contact_row(left_item, right_item) -> QHBoxLayout:
+            r = QHBoxLayout()
+            r.setSpacing(16)
+            r.addWidget(left_item)
+            r.addWidget(right_item)
+            return r
+
+        cl.addLayout(contact_row(
+            self._make_contact_item(
+                badge=("QQ", "#e9e8fc", "#5b5bd6"),
+                caption="QQ ①",
+                value="817094",
+                btn_text="点击对话 ↗",
+                on_click=lambda: self._open_qq_chat("817094"),
+            ),
+            self._make_contact_item(
+                badge=("QQ", "#e9e8fc", "#5b5bd6"),
+                caption="QQ ②",
+                value="2912167928",
+                btn_text="点击对话 ↗",
+                on_click=lambda: self._open_qq_chat("2912167928"),
+            ),
+        ))
+        cl.addSpacing(14)
+        cl.addLayout(contact_row(
+            self._make_contact_item(
+                badge=("群", "#fbeedd", "#d98c2b"),
+                caption="QQ 群（点击加群）",
+                value="426669837",
+                btn_text="点击加群 ↗",
+                on_click=lambda: self._copy_contact(
+                    "426669837", "QQ 群号已复制，请在 QQ 中搜索群号加入"
+                ),
+            ),
+            self._make_contact_item(
+                badge=("微", "#dcf4f4", "#16a3a3"),
+                caption="微信（点击复制）",
+                value="qqmu66",
+                btn_text="复制微信号",
+                on_click=lambda: self._copy_contact(
+                    "qqmu66", "微信号 qqmu66 已复制，请到微信中添加好友"
+                ),
+            ),
+        ))
+
+        # 操作反馈
+        self.hint_label = QLabel("")
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setAlignment(Qt.AlignCenter)
+        self.hint_label.setStyleSheet("font-size:12px;color:#6c5ce7;")
+        cl.addWidget(self.hint_label)
+
+        v.addWidget(card)
+
+    def _make_contact_item(
+        self,
+        badge: tuple,
+        caption: str,
+        value: str,
+        btn_text: str,
+        on_click,
+    ) -> QFrame:
+        """构造一个联系方式条目（图标 + 名称 + 操作按钮）。"""
+        item = QFrame()
+        item.setObjectName("contactItem")
+        item.setFixedHeight(86)
+        item.setStyleSheet(
+            "#contactItem{background:#fafafd;border:1px solid #ececf4;border-radius:12px;}"
+        )
+        h = QHBoxLayout(item)
+        h.setContentsMargins(16, 12, 16, 12)
+        h.setSpacing(12)
+
+        badge_text, badge_bg, badge_fg = badge
+        badge_lbl = QLabel(badge_text)
+        badge_lbl.setFixedSize(46, 46)
+        badge_lbl.setAlignment(Qt.AlignCenter)
+        badge_lbl.setStyleSheet(
+            f"background:{badge_bg};color:{badge_fg};border-radius:10px;"
+            "font-weight:800;font-size:15px;border:none;"
+        )
+        h.addWidget(badge_lbl)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        caption_lbl = QLabel(caption)
+        caption_lbl.setStyleSheet("font-size:12px;color:#9a9aaa;border:none;background:none;")
+        value_lbl = QLabel(value)
+        value_lbl.setStyleSheet("font-size:18px;font-weight:700;color:#222;border:none;background:none;")
+        text_col.addWidget(caption_lbl)
+        text_col.addWidget(value_lbl)
+        h.addLayout(text_col)
+        h.addStretch(1)
+
+        btn = QPushButton(btn_text)
+        btn.setCursor(QCursor(Qt.PointingHandCursor))
+        btn.setStyleSheet(
+            "QPushButton{background:#ffffff;color:#333;border:1px solid #dcdce6;"
+            "border-radius:8px;padding:8px 14px;font-size:13px;}"
+            "QPushButton:hover{background:#f4f3ff;border-color:#c8c4f2;color:#5b5bd6;}"
+        )
+        btn.clicked.connect(on_click)
+        h.addWidget(btn)
+        return item
+
+    # ------------------------------------------------------------------
+    def _copy_to_clipboard(self, text: str) -> None:
+        QApplication.clipboard().setText(text)
+
+    def _copy_contact(self, text: str, hint: str) -> None:
+        self._copy_to_clipboard(text)
+        self.hint_label.setText(f"✓ {hint}：{text}")
+
+    def _open_qq_chat(self, uin: str) -> None:
+        """唤起 QQ 临时会话；同时复制 QQ 号，QQ 未安装时可手动添加。"""
+        self._copy_to_clipboard(uin)
+        QDesktopServices.openUrl(QUrl(f"tencent://message/?uin={uin}&Site=&Menu=yes"))
+        self.hint_label.setText(f"✓ 正在唤起 QQ 对话（QQ 号 {uin} 已复制，可手动添加）")
 
 
 # ---------------------------------------------------------------------------
@@ -1543,6 +3261,8 @@ class MainWindow(QMainWindow):
         self._drag_pos: Optional[QPoint] = None
         self._fetch_workers: List[VersionFetchWorker] = []
         self._fetch_pending: int = 0
+        # 当前选中的分类 key；搜索关键字直接从搜索框读取
+        self._current_category: str = "all"
 
         self._build_ui()
         self._apply_qss()
@@ -1573,15 +3293,13 @@ class MainWindow(QMainWindow):
         tb.addWidget(title_label)
         tb.addStretch(1)
 
-        # GitHub 图标
-        self.btn_github = QPushButton("★ GitHub")
-        self.btn_github.setObjectName("iconBtn")
-        self.btn_github.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_github.setToolTip("获取最新版本")
-        self.btn_github.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(GITHUB_URL))
-        )
-        tb.addWidget(self.btn_github)
+        # 关于我们
+        self.btn_about = QPushButton("💡 关于我们")
+        self.btn_about.setObjectName("iconBtn")
+        self.btn_about.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_about.setToolTip("了解我们 & 联系方式")
+        self.btn_about.clicked.connect(self._on_about_clicked)
+        tb.addWidget(self.btn_about)
 
         # 刷新版本列表按钮
         self.btn_refresh = QPushButton("⟳ 刷新版本")
@@ -1620,6 +3338,36 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(self.title_bar)
 
+        # ------- 分类筛选 + 搜索栏 -------
+        self.filter_bar = QFrame()
+        self.filter_bar.setObjectName("filterBar")
+        self.filter_bar.setFixedHeight(52)
+        fb = QHBoxLayout(self.filter_bar)
+        fb.setContentsMargins(18, 8, 18, 8)
+        fb.setSpacing(8)
+
+        self.category_buttons: Dict[str, QPushButton] = {}
+        for cat in ["all", *CATEGORY_ORDER]:
+            chip = QPushButton(CATEGORIES[cat])
+            chip.setObjectName("categoryChip")
+            chip.setCheckable(True)
+            chip.setChecked(cat == "all")
+            chip.setCursor(QCursor(Qt.PointingHandCursor))
+            chip.clicked.connect(lambda _=False, c=cat: self._on_category_chosen(c))
+            fb.addWidget(chip)
+            self.category_buttons[cat] = chip
+        fb.addSpacing(10)
+
+        self.search_box = QLineEdit()
+        self.search_box.setObjectName("searchBox")
+        self.search_box.setPlaceholderText("🔍 搜索软件名 / 别名 / 分类名，例如 redis、数据库、kafka、缓存…")
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.setFixedHeight(34)
+        self.search_box.textChanged.connect(self._apply_filter)
+        fb.addWidget(self.search_box, stretch=1)
+
+        outer.addWidget(self.filter_bar)
+
         # ------- 主体：卡片列表 + 日志区 -------
         body = QSplitter(Qt.Vertical)
         body.setObjectName("bodySplitter")
@@ -1634,11 +3382,27 @@ class MainWindow(QMainWindow):
         cards_layout.setContentsMargins(18, 18, 18, 18)
         cards_layout.setSpacing(14)
 
-        self.cards: List[ComponentCard] = []
+        # 按分类分组：每组一个分区标题，其后是该分类的卡片
+        by_cat: Dict[str, List[Component]] = {c: [] for c in CATEGORY_ORDER}
         for comp in self.components:
-            card = ComponentCard(comp, self._append_log)
-            cards_layout.addWidget(card)
-            self.cards.append(card)
+            by_cat[comp.category].append(comp)
+
+        self.cards: List[ComponentCard] = []
+        self._cards_by_cat: Dict[str, List[ComponentCard]] = {c: [] for c in CATEGORY_ORDER}
+        self.section_headers: Dict[str, QLabel] = {}
+        for cat in CATEGORY_ORDER:
+            comps = by_cat[cat]
+            if not comps:
+                continue
+            header = QLabel(f"{CATEGORIES[cat]}（{len(comps)}）")
+            header.setObjectName("sectionHeader")
+            cards_layout.addWidget(header)
+            self.section_headers[cat] = header
+            for comp in comps:
+                card = ComponentCard(comp, self._append_log)
+                cards_layout.addWidget(card)
+                self.cards.append(card)
+                self._cards_by_cat[cat].append(card)
         cards_layout.addStretch(1)
         scroll.setWidget(cards_wrap)
         body.addWidget(scroll)
@@ -1662,9 +3426,20 @@ class MainWindow(QMainWindow):
         body.setStretchFactor(1, 2)
         outer.addWidget(body, stretch=1)
 
-        # 底部状态条
-        self.status_bar = QLabel(f"系统：{CURRENT_OS} ({MACHINE})   工作目录：{CONFIG_DIR}")
+        # 底部状态条：左侧系统信息，右侧版本号
+        self.status_bar = QFrame()
         self.status_bar.setObjectName("statusBar")
+        self.status_bar.setFixedHeight(26)
+        sb = QHBoxLayout(self.status_bar)
+        sb.setContentsMargins(14, 0, 14, 0)
+        sb.setSpacing(0)
+        status_left = QLabel(f"系统：{CURRENT_OS} ({MACHINE})   工作目录：{CONFIG_DIR}")
+        status_left.setStyleSheet("color:#9aa0ad;background:none;border:none;")
+        sb.addWidget(status_left)
+        sb.addStretch(1)
+        status_version = QLabel(f"版本号 {APP_VERSION}")
+        status_version.setStyleSheet("color:#9aa0ad;background:none;border:none;")
+        sb.addWidget(status_version)
         outer.addWidget(self.status_bar)
 
     # ------------------------------------------------------------------
@@ -1696,6 +3471,46 @@ class MainWindow(QMainWindow):
             }
             #donateBtn { color: #ff8181; font-size: 18px; }
             #closeBtn:hover { background: #e74c3c; }
+
+            /* ----------------- 分类筛选 / 搜索栏 ----------------- */
+            #filterBar {
+                background: rgba(255,255,255,0.75);
+                border-bottom: 1px solid #dde3ea;
+            }
+            QPushButton#categoryChip {
+                background: #ffffff;
+                color: #546e7a;
+                border: 1px solid #cfd8dc;
+                border-radius: 15px;
+                padding: 6px 14px;
+                font-size: 12px;
+            }
+            QPushButton#categoryChip:hover {
+                border-color: #90caf9;
+                color: #1976d2;
+            }
+            QPushButton#categoryChip:checked {
+                background: #1976d2;
+                color: white;
+                border-color: #1976d2;
+                font-weight: 600;
+            }
+            #searchBox {
+                background: white;
+                border: 1px solid #cfd8dc;
+                border-radius: 8px;
+                padding: 0 12px;
+                font-size: 13px;
+                color: #263238;
+            }
+            #searchBox:hover { border-color: #90caf9; }
+            #searchBox:focus { border-color: #1976d2; }
+            #sectionHeader {
+                color: #37474f;
+                font-size: 14px;
+                font-weight: 700;
+                padding: 4px 2px;
+            }
 
             #cardsScroll { border: none; background: transparent; }
             #cardsWrap { background: transparent; }
@@ -1846,7 +3661,6 @@ class MainWindow(QMainWindow):
             #statusBar {
                 background: #eceff1;
                 color: #455a64;
-                padding: 6px 14px;
                 font-size: 12px;
                 border-bottom-left-radius: 8px;
                 border-bottom-right-radius: 8px;
@@ -1905,6 +3719,35 @@ class MainWindow(QMainWindow):
             self.btn_max.setText("❐")
 
     # ------------------------------------------------------------------
+    # 分类筛选 & 搜索
+    # ------------------------------------------------------------------
+    def _on_category_chosen(self, cat: str) -> None:
+        """点击分类胶囊：更新选中态并重新过滤卡片。"""
+        self._current_category = cat
+        for c, chip in self.category_buttons.items():
+            chip.setChecked(c == cat)
+        self._apply_filter()
+
+    def _match_keyword(self, comp: Component, keyword: str) -> bool:
+        """关键字在 显示名 / key / 分类名 / 别名 中做大小写不敏感的包含匹配。"""
+        haystack = [comp.display_name, comp.key, CATEGORIES.get(comp.category, ""), *comp.aliases]
+        return any(keyword in str(x).lower() for x in haystack)
+
+    def _apply_filter(self) -> None:
+        """分类与关键字取交集；某个分类下没有可见卡片时连分区标题一起隐藏。"""
+        keyword = self.search_box.text().strip().lower()
+        for cat, header in self.section_headers.items():
+            any_visible = False
+            for card in self._cards_by_cat[cat]:
+                ok_category = self._current_category in ("all", cat)
+                ok_keyword = (not keyword) or self._match_keyword(card.component, keyword)
+                visible = ok_category and ok_keyword
+                card.setVisible(visible)
+                if visible:
+                    any_visible = True
+            header.setVisible(any_visible)
+
+    # ------------------------------------------------------------------
     def _start_fetch_versions(self) -> None:
         """从各官网并发拉取版本列表。可反复调用（刷新）。"""
         # 若有 worker 仍在运行，等它跑完再触发新一轮
@@ -1948,6 +3791,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _on_donate_clicked(self) -> None:
         DonateDialog(self).exec()
+
+    # ------------------------------------------------------------------
+    def _on_about_clicked(self) -> None:
+        AboutDialog(self).exec()
 
     # ------------------------------------------------------------------
     def _append_log(self, level: str, msg: str) -> None:

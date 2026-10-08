@@ -12,13 +12,14 @@ A cross-platform desktop GUI tool built with Python + PySide6 that automates the
 ## 1. Features
 
 - 🖥️ **Cross-platform.** Detects Windows / macOS / Linux (and x64 / arm64) at runtime and picks the correct distribution.
-- 📦 **One-click provisioning.** Preloaded with multiple versions of six popular toolchains — the whole pipeline (download → unpack → configure) is automated:
-    - JDK (Adoptium Temurin — 21 / 17 / 11 / 8)
-    - Apache Maven (3.9.6 / 3.9.5 / 3.8.8 / 3.6.3)
-    - Apache Tomcat (10.1 / 9.0 / 8.5)
-    - MySQL Server (8.0.37 / 8.0.36 / 5.7.44)
-    - Python (3.12 / 3.11 / 3.10 / 3.9)
-    - Node.js (20 / 18 / 16)
+- 🗂️ **Categories & global search.** Components are organized into six categories — **Java / Python / Frontend / Databases / Big Data / AI**. Click a category chip to filter, or type a software name, alias (e.g. `es`, `cache`) or category name (e.g. `database`) into the search box for fuzzy matching; chips and keywords can be combined.
+- 📦 **One-click provisioning.** 29 preloaded components — the whole pipeline (download → unpack/build → configure) is automated:
+    - **Java:** JDK (Adoptium Temurin — 21 / 17 / 11 / 8), Apache Maven, Apache Tomcat
+    - **Python:** Python (3.12 / 3.11 / 3.10 / 3.9), Miniconda
+    - **Frontend:** Node.js (20 / 18 / 16), Git
+    - **Databases:** MySQL, MariaDB (12.3 / 11.4 LTS / 10.11 LTS), SQL Server 2025 Express (Windows online bootstrapper, guided), PostgreSQL (EDB binaries on Win/macOS; source auto-build on Linux), Redis (source auto-`make` on macOS/Linux; community Windows port), Elasticsearch (8.15 / 7.17), openGauss (Linux only), DaMeng DM8 (ISO extracted, GUI installer guided), OceanBase (Linux only; RPM unpacked in pure Python), TiDB (Linux only, x86_64/arm64), KingbaseES (Linux only; portable server tar with built-in license; Referer header sent automatically), YashanDB (Linux only; yasboot init)
+    - **Big Data:** Hadoop, ZooKeeper, Hive, HBase, Spark, Flink, Kafka
+    - **AI:** Ollama (local LLM runtime), Claude Code (portable npm install — Node.js required), CC-Switch (portable zip / .app / AppImage)
 - 🔍 **Smart detection.** Checks whether `JAVA_HOME` and friends already exist and are valid; missing/invalid entries are flagged for reconfiguration.
 - 🛠️ **Environment-variable management.**
     - Windows: writes to `HKCU\Environment` via `winreg` and refreshes with `setx`.
@@ -33,7 +34,7 @@ A cross-platform desktop GUI tool built with Python + PySide6 that automates the
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│  Env Auto Setup By rgh                          ★ GitHub — ▢ × │
+│  Env Auto Setup By rgh                            About — ▢ × │
 ├───────────────────────────────────────────────────────────────┤
 │  ┌─ JDK (Temurin) ────────────────────────────────────────┐   │
 │  │  Configured: JAVA_HOME=/Users/x/.env-tools/jdk/jdk-17  │   │
@@ -84,12 +85,12 @@ The working directory `~/.env-tools/` is created automatically on first launch a
 
 ## 4. Usage
 
-1. Pick the card for the component you want.
-2. Choose a version from the drop-down.
+1. (Optional) Filter cards: click a category chip (e.g. **Big Data**) or type a name/alias/category keyword (e.g. `redis`, `es`, `database`) in the search box.
+2. Pick a version from the drop-down.
 3. Click **"Install"**:
     - the archive is streamed and the progress bar updates continuously;
-    - it is extracted to `~/.env-tools/<component>/<component>-<version>/`;
-    - the corresponding `XXX_HOME` variable is written and the `bin` directory is appended to `PATH`.
+    - it is extracted to `~/.env-tools/<component>/<component>-<version>/` (source packages like Redis are compiled automatically);
+    - the corresponding `XXX_HOME` variable is written and the executable's directory is appended to `PATH`.
 4. Already downloaded but not configured? Click **"Configure Only"**.
 5. All actions are echoed to the log panel.
 
@@ -159,10 +160,18 @@ Likely a slow mirror. Click **Cancel** and retry, or switch mirrors as described
 **Q3. Will my existing `JAVA_HOME` be overwritten?**
 Yes — the most recent installation wins. The new `bin` directory is appended to `PATH` idempotently.
 
-**Q4. `.tar.xz` archives?**
-Supported (MySQL Linux distribution uses it).
+**Q4. `.tar.xz` / `.tar` / `.rpm` / AppImage archives?**
+`.tar.xz` is supported (MySQL Linux distribution uses it). KingbaseES portable builds carry a `.tar` suffix but are in fact gzip-compressed; the extractor opens them with `tarfile` mode `r:*`, which sniffs the real format by magic bytes (genuine uncompressed tar works too). RPM packages (e.g. OceanBase) are unpacked with a built-in pure-Python parser (xz/lzma + cpio), so no system `rpm2cpio` is needed. AppImages (e.g. CC-Switch on Linux) are downloaded as-is and marked executable — a system with FUSE support is required to run them.
 
-**Q5. `setx` truncation on Windows?**
+**Q5. Which Chinese/domestic databases are supported?**
+- **DaMeng DM8:** official packages are zip-wrapped ISO images; the tool extracts the ISO, then instructs you to mount it and run the vendor installer (a system-level, interactive step).
+- **openGauss / OceanBase / TiDB / KingbaseES / YashanDB (Linux only):** downloaded and unpacked automatically; instance initialization is documented in the post-install notes (KingbaseES sends a `Referer` header to pass the vendor's OSS hotlink protection).
+- **Not bundled (no anonymous direct download — apply on the vendor site):** IBM DB2 (Fix Central requires an IBMid), HighGo (name/phone/SMS/email), Vastbase (name/phone/SMS/company/MAC, 90-day MAC-bound license), GBase (login + enterprise real-name verification), Oscar/神通 (login-only download page with no public files).
+
+**Q6. Claude Code install fails: `npm` not found?**
+Install Node.js first (available as a component in this tool), then click Install on the Claude Code card again.
+
+**Q7. `setx` truncation on Windows?**
 The tool bypasses `setx`'s 1024-char limit by writing to the registry with `winreg`.
 
 ---
