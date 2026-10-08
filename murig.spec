@@ -99,7 +99,7 @@ if sys.platform == "darwin":
         exe,
         name=f"{APP_NAME}.app",
         # icon=str(SPEC_DIR / "assets" / "icon.icns"),
-        bundle_identifier="com.rgh.murig",
+        bundle_identifier="com.qqmu.murig",
         info_plist={
             "CFBundleName": "MuRig",
             "CFBundleDisplayName": "MuRig - 编程开发环境自动装配小工具",

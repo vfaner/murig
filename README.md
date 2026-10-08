@@ -535,37 +535,13 @@ RPM（如 OceanBase）内置纯 Python 解析（xz/lzma + cpio newc），无需�
 
 ## 📄 许可证
 
-本项目采用 **MIT License** 开源发布，版权归作者 **rgh** 所有。
+本项目基于 **MIT License** 开源，版权所有 © 2026 [**沐编程**](https://nav.qqmu.com)。
 
-```
-MIT License
-
-Copyright (c) 2026 rgh
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-许可证全文亦可参考 <https://opensource.org/licenses/MIT>。
+完整条款见仓库根目录的 [LICENSE](LICENSE) 文件；在线版本可参考 <https://opensource.org/licenses/MIT>。
 
 ---
 
 <p align="center">
-  Made with ❤️ by <b>rgh</b><br/>
+  Made with ❤️ by <b><a href="https://nav.qqmu.com">沐编程</a></b><br/>
   <sub>如果觉得有用，别忘了给个 ⭐ Star！</sub>
 </p>

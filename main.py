@@ -3,8 +3,8 @@
 MuRig - 编程开发环境自动装配小工具
 ==================================
 
-Copyright (c) 2026 rgh
-Licensed under the MIT License. See LICENSE file (or the README) for details.
+Copyright (c) 2026 沐编程 (https://nav.qqmu.com)
+Licensed under the MIT License. See LICENSE file in the repository root for details.
 
 一个基于 PySide6 的跨平台桌面 GUI 工具，用于自动下载、解压并配置常用开发环境组件：
 JDK、Maven、Tomcat、MySQL、MariaDB、PostgreSQL、Redis、Elasticsearch、Python、Miniconda、

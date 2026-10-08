@@ -3,7 +3,7 @@
 A cross-platform desktop GUI tool built with Python + PySide6 that automates the download, extraction and environment-variable configuration of common developer toolchains. Save yourself from tedious manual installation.
 
 > Project: **MuRig**
-> Author: **rgh**
+> Author: [**沐编程**](https://nav.qqmu.com)
 > Platforms: Windows 10/11, macOS 12+, Ubuntu 20.04+
 > License: MIT License
 
@@ -34,7 +34,7 @@ A cross-platform desktop GUI tool built with Python + PySide6 that automates the
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│  MuRig By rgh                            About — ▢ × │
+│  MuRig By 沐编程                         About — ▢ × │
 ├───────────────────────────────────────────────────────────────┤
 │  ┌─ JDK (Temurin) ────────────────────────────────────────┐   │
 │  │  Configured: JAVA_HOME=/Users/x/.env-tools/jdk/jdk-17  │   │
@@ -199,30 +199,6 @@ murig/
 
 ## 9. License
 
-This project is released under the **MIT License**. Copyright (c) 2026 **rgh**.
+This project is released under the **MIT License**. Copyright © 2026 [**沐编程**](https://nav.qqmu.com).
 
-```
-MIT License
-
-Copyright (c) 2026 rgh
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-See also <https://opensource.org/licenses/MIT>.
+See the [LICENSE](LICENSE) file in the repository root for the full text, or visit <https://opensource.org/licenses/MIT>.
