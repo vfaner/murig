@@ -1,8 +1,8 @@
-# Env Auto Setup — by rgh
+# MuRig — Automated Developer Environment Setup
 
 A cross-platform desktop GUI tool built with Python + PySide6 that automates the download, extraction and environment-variable configuration of common developer toolchains. Save yourself from tedious manual installation.
 
-> Project: **env-auto-setup**
+> Project: **MuRig**
 > Author: **rgh**
 > Platforms: Windows 10/11, macOS 12+, Ubuntu 20.04+
 > License: MIT License
@@ -34,7 +34,7 @@ A cross-platform desktop GUI tool built with Python + PySide6 that automates the
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│  Env Auto Setup By rgh                            About — ▢ × │
+│  MuRig By rgh                            About — ▢ × │
 ├───────────────────────────────────────────────────────────────┤
 │  ┌─ JDK (Temurin) ────────────────────────────────────────┐   │
 │  │  Configured: JAVA_HOME=/Users/x/.env-tools/jdk/jdk-17  │   │
@@ -61,8 +61,8 @@ A cross-platform desktop GUI tool built with Python + PySide6 that automates the
 ### Clone and install
 
 ```bash
-git clone https://github.com/yourname/env-auto-setup.git
-cd env-auto-setup
+git clone https://github.com/yourname/murig.git
+cd murig
 
 python -m venv .venv
 # Windows
@@ -187,7 +187,7 @@ The tool bypasses `setx`'s 1024-char limit by writing to the registry with `winr
 ## 8. Project layout
 
 ```
-env-auto-setup/
+murig/
 ├─ main.py             # entry point (UI + logic)
 ├─ requirements.txt    # dependency list
 ├─ README.md           # Chinese documentation

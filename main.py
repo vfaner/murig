@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-编程开发环境自动装配小工具 By rgh
-==========================
+MuRig - 编程开发环境自动装配小工具
+==================================
 
 Copyright (c) 2026 rgh
 Licensed under the MIT License. See LICENSE file (or the README) for details.
@@ -97,8 +97,8 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # 全局常量与工具函数
 # ---------------------------------------------------------------------------
-APP_NAME = "编程开发环境自动装配小工具 By rgh"
-APP_VERSION = "v1.0.1"
+APP_NAME = "MuRig - 编程开发环境自动装配小工具"
+APP_VERSION = "v1.1.0"
 CONFIG_DIR = Path.home() / ".env-tools"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -584,7 +584,7 @@ def _get(url: str, timeout: int = 10) -> requests.Response:
     - SSL 错误（企业代理 MITM / 系统证书缺失等）：最后一次尝试关闭 SSL 校验
     """
     import time as _time
-    headers = {"User-Agent": "env-auto-setup"}
+    headers = {"User-Agent": "MuRig"}
     last_exc: Optional[Exception] = None
     for attempt in range(3):
         try:
@@ -970,7 +970,7 @@ def fetch_pg_versions() -> List[ComponentVersion]:
         try:
             r = requests.head(
                 url, timeout=10, allow_redirects=True,
-                headers={"User-Agent": "env-auto-setup"},
+                headers={"User-Agent": "MuRig"},
             )
             if r.status_code == 200:
                 result.append(ComponentVersion(
@@ -993,7 +993,7 @@ def fetch_opengauss_versions() -> List[ComponentVersion]:
         try:
             r = requests.head(
                 url, timeout=10, allow_redirects=True,
-                headers={"User-Agent": "env-auto-setup"},
+                headers={"User-Agent": "MuRig"},
             )
             if r.status_code == 200:
                 result.append(_tgz_cv(v, _opengauss_urls(v)))
@@ -1067,7 +1067,7 @@ def fetch_kingbase_versions() -> List[ComponentVersion]:
         "https://www.kingbase.com.cn/cebest-cms/basic-content/other-versions-page-list",
         json={"kesId": 1, "page": 0, "size": 80},
         timeout=15,
-        headers={"User-Agent": "env-auto-setup"},
+        headers={"User-Agent": "MuRig"},
     )
     resp.raise_for_status()
     rows = resp.json()["data"]["content"]
@@ -1116,7 +1116,7 @@ def fetch_yashandb_versions() -> List[ComponentVersion]:
         "https://www.yashandb.com/yashan-server/api/portal/software/findByCondition",
         json={"current": 1, "size": 30},
         timeout=15,
-        headers={"User-Agent": "env-auto-setup"},
+        headers={"User-Agent": "MuRig"},
     )
     resp.raise_for_status()
     rows = resp.json()["data"]["data"]
@@ -2050,6 +2050,7 @@ class EnvManager:
     def set_unix_env(name: str, value: str) -> Path:
         """在 UNIX 系统上，把 export 语句写入 shell 配置文件；返回被修改的文件路径。"""
         rc = EnvManager._shell_rc_file()
+        # 标记保持旧品牌名 env-auto-setup：改名 MuRig 后老用户 rc 文件里的块仍需被识别和幂等更新
         marker_begin = f"# >>> env-auto-setup:{name} >>>"
         marker_end = f"# <<< env-auto-setup:{name} <<<"
         new_block = f'{marker_begin}\nexport {name}="{value}"\n{marker_end}\n'

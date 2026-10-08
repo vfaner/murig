@@ -1,7 +1,7 @@
-# 编程开发环境自动装配小工具 (env-auto-setup)
+# MuRig · 编程开发环境自动装配小工具
 
 <p align="center">
-  <img src="assets/env-auto-setup.png" alt="env-auto-setup 主界面截图" width="720"/>
+  <img src="assets/murig.png" alt="murig 主界面截图" width="720"/>
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="platform"/>
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license"/>
   <img src="https://img.shields.io/badge/GUI-PySide6-brightgreen.svg" alt="pyside6"/>
-  <a href="https://github.com/vfaner/env-auto-setup/releases"><img src="https://img.shields.io/github/v/release/vfaner/env-auto-setup?color=orange" alt="release"/></a>
+  <a href="https://github.com/vfaner/murig/releases"><img src="https://img.shields.io/github/v/release/vfaner/murig?color=orange" alt="release"/></a>
 </p>
 
 ---
@@ -23,20 +23,20 @@
 
 > **不需要 Python 环境，不需要克隆源码，双击即可运行。**
 
-请到 **[Releases 页面](https://github.com/vfaner/env-auto-setup/releases/latest)** 下载对应操作系统的最新版本：
+请到 **[Releases 页面](https://github.com/vfaner/murig/releases/latest)** 下载对应操作系统的最新版本：
 
 | 系统 | 下载文件 | 说明 |
 |------|----------|------|
-| 🪟 **Windows** | [`env-auto-setup.exe`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup.exe) | 双击运行，无需安装 |
-| 🍎 **macOS (Apple Silicon)** | [`env-auto-setup-macos-arm64.zip`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup-macos-arm64.zip) | 解压后双击 `env-auto-setup.app` |
-| 🍎 **macOS (通用)** | [`env-auto-setup-macos.zip`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup-macos.zip) | 解压后双击 `env-auto-setup.app` |
-| 🐧 **Linux (x64)** | [`env-auto-setup-linux-x64`](https://github.com/vfaner/env-auto-setup/releases/latest/download/env-auto-setup-linux-x64) | `chmod +x` 后直接运行 |
+| 🪟 **Windows** | [`murig.exe`](https://github.com/vfaner/murig/releases/latest/download/murig.exe) | 双击运行，无需安装 |
+| 🍎 **macOS (Apple Silicon)** | [`murig-macos-arm64.zip`](https://github.com/vfaner/murig/releases/latest/download/murig-macos-arm64.zip) | 解压后双击 `murig.app` |
+| 🍎 **macOS (通用)** | [`murig-macos.zip`](https://github.com/vfaner/murig/releases/latest/download/murig-macos.zip) | 解压后双击 `murig.app` |
+| 🐧 **Linux (x64)** | [`murig-linux-x64`](https://github.com/vfaner/murig/releases/latest/download/murig-linux-x64) | `chmod +x` 后直接运行 |
 
 ### 首次启动提示
 
-- **macOS**：由于未做代码签名，首次打开时系统可能提示"无法验证开发者"。请到「系统设置 → 隐私与安全性」下方点击 **"仍要打开"**；或用 `xattr -cr env-auto-setup.app` 移除隔离属性。
+- **macOS**：由于未做代码签名，首次打开时系统可能提示"无法验证开发者"。请到「系统设置 → 隐私与安全性」下方点击 **"仍要打开"**；或用 `xattr -cr murig.app` 移除隔离属性。
 - **Windows**：Defender / SmartScreen 可能弹出"未识别应用"，点击 **"更多信息 → 仍要运行"** 即可。
-- **Linux**：如果双击无响应，请在终端执行 `chmod +x env-auto-setup-linux-x64 && ./env-auto-setup-linux-x64`。
+- **Linux**：如果双击无响应，请在终端执行 `chmod +x murig-linux-x64 && ./murig-linux-x64`。
 
 > 💡 只想看看代码 / 自己二次开发？往下翻到 [开发者指南](#-快速开始)。
 
@@ -80,7 +80,7 @@
 
 ## 📌 项目描述
 
-**env-auto-setup** 是一款开源的桌面小工具，目标是把开发者最常用的语言运行时、构建工具、中间件的下载与配置全部自动化。
+**MuRig** 是一款开源的桌面小工具，目标是把开发者最常用的语言运行时、构建工具、中间件的下载与配置全部自动化。
 
 它做了这几件事：
 
@@ -214,8 +214,8 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/yourname/env-auto-setup.git
-cd env-auto-setup
+git clone https://github.com/yourname/murig.git
+cd murig
 ```
 
 ### 2. 创建虚拟环境（推荐）
@@ -313,7 +313,7 @@ conda --version
 ## 📸 截图预览
 
 <p align="center">
-  <img src="assets/env-auto-setup.png" alt="主界面" width="800"/>
+  <img src="assets/murig.png" alt="主界面" width="800"/>
 </p>
 
 界面元素说明：
@@ -392,13 +392,13 @@ CONFIG_DIR = Path.home() / ".env-tools"
 
 ```bash
 pip install pyinstaller
-pyinstaller env-auto-setup.spec --noconfirm --clean
+pyinstaller murig.spec --noconfirm --clean
 ```
 
 产物：
-- Windows：`dist/env-auto-setup.exe`
-- macOS：`dist/env-auto-setup.app`
-- Linux：`dist/env-auto-setup`
+- Windows：`dist/murig.exe`
+- macOS：`dist/murig.app`
+- Linux：`dist/murig`
 
 ### 自动发布三平台版本（推荐）
 
@@ -416,10 +416,10 @@ git push origin v1.1.0
 ## 📁 目录结构
 
 ```
-env-auto-setup/
+murig/
 ├── main.py                             # 主程序（含 UI 与全部逻辑）
 ├── requirements.txt                    # Python 依赖清单
-├── env-auto-setup.spec                 # PyInstaller 打包配置
+├── murig.spec                 # PyInstaller 打包配置
 ├── README.md                           # 中文说明（本文件）
 ├── README_EN.md                        # 英文说明
 ├── LICENSE                             # MIT 许可证
@@ -428,7 +428,7 @@ env-auto-setup/
 │   └── workflows/
 │       └── build-and-release.yml       # 三平台自动构建 + 发布
 └── assets/                             # 静态资源
-    ├── env-auto-setup.png                       # 应用截图
+    ├── murig.png                       # 应用截图
     ├── wechat.png                      # 微信收款码
     ├── alipay.png                      # 支付宝收款码
     └── qq.png                          # QQ 收款码

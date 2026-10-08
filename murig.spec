@@ -1,19 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for env-auto-setup.
+PyInstaller spec file for MuRig.
 
 跨平台构建脚本，在 Windows/macOS/Linux 上分别运行：
-    pyinstaller env-auto-setup.spec
+    pyinstaller murig.spec
 
 产物路径：
-    dist/env-auto-setup           # Linux 单可执行文件
-    dist/env-auto-setup.exe       # Windows 单可执行文件
-    dist/env-auto-setup.app       # macOS .app bundle
+    dist/murig           # Linux 单可执行文件
+    dist/murig.exe       # Windows 单可执行文件
+    dist/murig.app       # macOS .app bundle
 """
 import sys
 from pathlib import Path
 
-APP_NAME = "env-auto-setup"
+APP_NAME = "murig"
 SPEC_DIR = Path(SPECPATH).resolve() if 'SPECPATH' in globals() else Path.cwd()
 
 # 打进包里的静态资源（打赏二维码、应用截图等）
@@ -99,12 +99,12 @@ if sys.platform == "darwin":
         exe,
         name=f"{APP_NAME}.app",
         # icon=str(SPEC_DIR / "assets" / "icon.icns"),
-        bundle_identifier="com.rgh.env-auto-setup",
+        bundle_identifier="com.rgh.murig",
         info_plist={
-            "CFBundleName": "编程开发环境自动装配小工具",
-            "CFBundleDisplayName": "编程开发环境自动装配小工具",
-            "CFBundleShortVersionString": "1.0.0",
-            "CFBundleVersion": "1.0.0",
+            "CFBundleName": "MuRig",
+            "CFBundleDisplayName": "MuRig - 编程开发环境自动装配小工具",
+            "CFBundleShortVersionString": "1.1.0",
+            "CFBundleVersion": "1.1.0",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "10.13.0",
         },

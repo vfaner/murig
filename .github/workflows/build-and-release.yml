@@ -18,17 +18,17 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: env-auto-setup-windows-x64
-            executable: env-auto-setup.exe
-            asset_pattern: env-auto-setup.exe
+            artifact_name: murig-windows-x64
+            executable: murig.exe
+            asset_pattern: murig.exe
           - os: macos-latest
-            artifact_name: env-auto-setup-macos
-            executable: env-auto-setup.app
-            asset_pattern: env-auto-setup-macos.zip
+            artifact_name: murig-macos
+            executable: murig.app
+            asset_pattern: murig-macos.zip
           - os: ubuntu-latest
-            artifact_name: env-auto-setup-linux-x64
-            executable: env-auto-setup
-            asset_pattern: env-auto-setup-linux-x64
+            artifact_name: murig-linux-x64
+            executable: murig
+            asset_pattern: murig-linux-x64
 
     steps:
       - name: Checkout code
@@ -58,21 +58,21 @@ jobs:
       - name: Build (Windows / Linux)
         if: matrix.os != 'macos-latest'
         run: |
-          pyinstaller env-auto-setup.spec --noconfirm --clean
+          pyinstaller murig.spec --noconfirm --clean
 
       - name: Build (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          pyinstaller env-auto-setup.spec --noconfirm --clean
+          pyinstaller murig.spec --noconfirm --clean
           # 打成 zip，保留 .app 结构和权限
           cd dist
-          zip -ry env-auto-setup-macos.zip env-auto-setup.app
+          zip -ry murig-macos.zip murig.app
 
       - name: Rename Linux binary
         if: matrix.os == 'ubuntu-latest'
         run: |
-          mv dist/env-auto-setup dist/env-auto-setup-linux-x64
-          chmod +x dist/env-auto-setup-linux-x64
+          mv dist/murig dist/murig-linux-x64
+          chmod +x dist/murig-linux-x64
 
       - name: Upload artifact (for debugging when workflow_dispatch)
         uses: actions/upload-artifact@v4

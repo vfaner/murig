@@ -138,7 +138,7 @@ build/
 dist/
 *.manifest
 
-# PyInstaller 的 .spec 文件：本项目**要提交** env-auto-setup.spec，
+# PyInstaller 的 .spec 文件：本项目**要提交** murig.spec，
 # 只忽略其他偶发生成的 spec 文件
 
 # 本地密钥 / 敏感配置
