@@ -46,6 +46,7 @@ try:
         QEvent,
         QObject,
         QPoint,
+        QRectF,
         QSize,
         Qt,
         QThread,
@@ -57,6 +58,7 @@ try:
         QColor,
         QCursor,
         QFont,
+        QFontMetrics,
         QIcon,
         QPainter,
         QPixmap,
@@ -71,10 +73,13 @@ try:
         QFileDialog,
         QFrame,
         QGraphicsDropShadowEffect,
+        QGridLayout,
+        QGroupBox,
         QHBoxLayout,
         QLabel,
         QLineEdit,
         QMainWindow,
+        QMenu,
         QMessageBox,
         QProgressBar,
         QPushButton,
@@ -98,9 +103,12 @@ except ImportError:  # pragma: no cover
 # 全局常量与工具函数
 # ---------------------------------------------------------------------------
 APP_NAME = "MuRig - 编程开发环境自动装配小工具"
-APP_VERSION = "v1.1.0"
+APP_VERSION = "v1.2.0"
 CONFIG_DIR = Path.home() / ".env-tools"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+# 应用设置目录：固定在家目录下，不随工作空间移动（工作空间可被用户改到任意盘）
+SETTINGS_DIR = Path.home() / ".murig"
+SETTINGS_FILE = SETTINGS_DIR / "config.json"
 
 # ---------------------------------------------------------------------------
 # 组件分类
@@ -137,6 +145,135 @@ def human_size(num: float) -> str:
 def ensure_dir(path: Path) -> None:
     """确保目录存在。"""
     path.mkdir(parents=True, exist_ok=True)
+
+
+def folder_icon(size: int = 16) -> QIcon:
+    """代码绘制的文件夹图标。
+
+    📁 emoji 在部分系统/字体下会渲染成空白方格，这里用 QPainter 直接画，
+    保证任何平台都能正常显示。
+    """
+    dpr = 2
+    pm = QPixmap(size * dpr, size * dpr)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    w = float(size * dpr)
+    # 文件夹背板（含左上标签页）
+    p.setBrush(QColor("#f9a825"))
+    p.drawRoundedRect(QRectF(w * 0.10, w * 0.20, w * 0.42, w * 0.28), w * 0.06, w * 0.06)
+    # 文件夹正面
+    p.setBrush(QColor("#fbc02d"))
+    p.drawRoundedRect(QRectF(w * 0.10, w * 0.34, w * 0.80, w * 0.46), w * 0.08, w * 0.08)
+    p.end()
+    pm.setDevicePixelRatio(dpr)
+    return QIcon(pm)
+
+
+class WorkspaceManager:
+    """三级工作空间解析：组件覆盖 > 分类工作空间 > 全局默认 > 内置 CONFIG_DIR。
+
+    设置存于 SETTINGS_FILE（~/.murig/config.json 的 "workspace" 段），与工作空间
+    本身分离：把工作空间改到别的盘不会丢掉配置。旧版设置文件 CONFIG_FILE
+    （~/.env-tools/config.json）在首次加载时整体迁移过来。
+    """
+
+    def __init__(self) -> None:
+        self.global_ws: Optional[str] = None
+        self.categories: Dict[str, str] = {}
+        self.components: Dict[str, str] = {}
+        self.migrated = False
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def load(cls) -> "WorkspaceManager":
+        """读取设置；必要时从旧 CONFIG_FILE 一次性迁移。"""
+        mgr = cls()
+        data: Dict = {}
+        if SETTINGS_FILE.exists():
+            try:
+                data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        elif CONFIG_FILE.exists():
+            # 旧版（v1.1.x 及以前）设置在工作空间内：整体搬到新位置
+            try:
+                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            mgr._apply(data.get("workspace", {}))
+            mgr.migrated = True
+            mgr.save(data.get("selections", {}))
+            return mgr
+        mgr._apply(data.get("workspace", {}))
+        return mgr
+
+    def _apply(self, ws: Dict) -> None:
+        self.global_ws = ws.get("global") or None
+        self.categories = dict(ws.get("categories") or {})
+        self.components = dict(ws.get("components") or {})
+
+    # ------------------------------------------------------------------
+    def save(self, selections: Optional[Dict] = None) -> None:
+        """落盘 workspace 段；selections 由调用方并入（保持单文件单 schema）。"""
+        try:
+            ensure_dir(SETTINGS_DIR)
+            data: Dict = {}
+            if SETTINGS_FILE.exists():
+                try:
+                    data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            data["workspace"] = {
+                "global": self.global_ws,
+                "categories": self.categories,
+                "components": self.components,
+            }
+            if selections is not None:
+                data["selections"] = selections
+            SETTINGS_FILE.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    def resolve(self, key: str, category: str) -> Path:
+        """组件安装根目录：组件覆盖 > 分类 > 全局 > CONFIG_DIR。"""
+        raw = self.components.get(key) or self.categories.get(category) or self.global_ws
+        return Path(raw) if raw else CONFIG_DIR
+
+    def roots_for(self, key: str, category: str) -> List[Path]:
+        """本地扫描用的根目录列表：当前解析根 + 默认根（去重），保证换工作空间
+        后旧位置已解压的组件仍能被看见、被配置。"""
+        roots = [self.resolve(key, category)]
+        if CONFIG_DIR not in roots:
+            roots.append(CONFIG_DIR)
+        return roots
+
+    # ------------------------------------------------------------------
+    def set_global(self, path: Optional[str]) -> None:
+        self.global_ws = path or None
+        self.save()
+
+    def set_category(self, category: str, path: Optional[str]) -> None:
+        if path:
+            self.categories[category] = path
+        else:
+            self.categories.pop(category, None)
+        self.save()
+
+    def set_component(self, key: str, path: Optional[str]) -> None:
+        if path:
+            self.components[key] = path
+        else:
+            self.components.pop(key, None)
+        self.save()
+
+
+# 全局单例：启动时加载一次，UI 修改后即时 save
+WS = WorkspaceManager.load()
 
 
 # ---------------------------------------------------------------------------
@@ -207,8 +344,12 @@ class Component:
     well_known_homes: List[str] = field(default_factory=list)
 
     def install_dir(self, version: str) -> Path:
-        """返回该版本组件的解压安装目录。"""
-        return CONFIG_DIR / self.key / f"{self.key}-{version}"
+        """返回该版本组件的解压安装目录（跟随工作空间配置）。"""
+        return WS.resolve(self.key, self.category) / self.key / f"{self.key}-{version}"
+
+    def workspace_root(self) -> Path:
+        """该组件当前的工作空间根目录。"""
+        return WS.resolve(self.key, self.category)
 
     def exec_path_in_home(self, home: str) -> Optional[Path]:
         """在给定 XXX_HOME 目录下查找可执行文件。"""
@@ -270,6 +411,26 @@ class Component:
                         installed=True,
                         source="标准安装路径",
                         home=home,
+                        exe_path=str(exe),
+                        version_text=_probe_version(str(exe), self.version_args),
+                    )
+
+        # 4) 扫描工作空间：环境变量被清掉后仍能认回本工具装过的组件
+        for root in WS.roots_for(self.key, self.category):
+            base = root / self.key
+            if not base.exists():
+                continue
+            homes = [
+                p for p in base.iterdir()
+                if p.is_dir() and not p.name.startswith(".") and p.name != "downloads"
+            ]
+            for home in sorted(homes, reverse=True):
+                exe = self.exec_path_in_home(str(home))
+                if exe is not None:
+                    return DetectResult(
+                        installed=True,
+                        source="工作空间",
+                        home=str(home),
                         exe_path=str(exe),
                         version_text=_probe_version(str(exe), self.version_args),
                     )
@@ -2501,8 +2662,26 @@ class ComponentCard(QFrame):
         self.btn_cancel.clicked.connect(self.on_cancel_clicked)
         mid.addWidget(self.btn_cancel)
 
+        # 工作空间入口：左键改目录，右键清除该组件的自定义目录
+        # 图标为代码绘制（📁 emoji 在部分系统渲染为空白方格）
+        self.btn_dir = QPushButton()
+        self.btn_dir.setIcon(folder_icon(16))
+        self.btn_dir.setIconSize(QSize(16, 16))
+        self.btn_dir.setObjectName("secondaryBtn")
+        self.btn_dir.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_dir.setFixedSize(34, 34)
+        self.btn_dir.clicked.connect(self._on_dir_clicked)
+        self.btn_dir.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.btn_dir.customContextMenuRequested.connect(self._on_dir_menu)
+        mid.addWidget(self.btn_dir)
+
         mid.addStretch(1)  # 右侧留空，避免下拉框被拉伸
         root.addLayout(mid)
+
+        # 安装位置提示行：跟随工作空间配置实时刷新
+        self.dir_label = QLabel()
+        self.dir_label.setStyleSheet("color:#90a4ae;font-size:12px;")
+        root.addWidget(self.dir_label)
 
         # 底部：进度条
         self.progress = QProgressBar()
@@ -2516,6 +2695,62 @@ class ComponentCard(QFrame):
         self.log_cb(level, f"[{self.component.display_name}] {msg}")
 
     # ------------------------------------------------------------------
+    def refresh_workspace_label(self) -> None:
+        """刷新「安装到：…」提示行与 📁 按钮 tooltip（不启动探测子进程）。"""
+        comp = self.component
+        target = comp.workspace_root() / comp.key
+        text = f"安装到：{target}"
+        fm = QFontMetrics(self.dir_label.font())
+        width = max(self.width() - 80, 120)
+        self.dir_label.setText(fm.elidedText(text, Qt.ElideMiddle, width))
+        self.dir_label.setToolTip(text)
+        tip = f"{text}（点击修改）"
+        if comp.key in WS.components:
+            tip += "；右键清除该组件的自定义目录"
+        self.btn_dir.setToolTip(tip)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "dir_label"):
+            self.refresh_workspace_label()
+
+    # ------------------------------------------------------------------
+    def _on_dir_clicked(self) -> None:
+        """卡片 📁 按钮：为该组件单独指定安装目录（覆盖分类与全局）。"""
+        comp = self.component
+        current = comp.workspace_root()
+        chosen = QFileDialog.getExistingDirectory(
+            self, f"选择 {comp.display_name} 的安装目录", str(current)
+        )
+        if not chosen:
+            return
+        if Path(chosen) == current:
+            # 选回当前解析目录：已有覆盖则视为清除，否则无操作
+            if comp.key in WS.components:
+                self._clear_dir_override()
+            return
+        WS.set_component(comp.key, chosen)
+        self._log("ok", f"已设置自定义安装目录：{chosen}")
+        self.refresh_workspace_label()
+        self._detect_status()
+
+    def _on_dir_menu(self, pos) -> None:
+        if self.component.key not in WS.components:
+            return
+        menu = QMenu(self)
+        act = QAction("清除自定义目录（回退分类/全局）", self)
+        act.triggered.connect(self._clear_dir_override)
+        menu.addAction(act)
+        menu.exec(self.btn_dir.mapToGlobal(pos))
+
+    def _clear_dir_override(self) -> None:
+        comp = self.component
+        WS.set_component(comp.key, None)
+        self._log("ok", f"已清除自定义目录，回退到 {comp.workspace_root()}")
+        self.refresh_workspace_label()
+        self._detect_status()
+
+    # ------------------------------------------------------------------
     def _detect_status(self) -> None:
         """检测该组件当前是否已安装、已配置。
 
@@ -2524,6 +2759,7 @@ class ComponentCard(QFrame):
         - 若本地已解压但未配置，则允许点击「仅配置环境变量」。
         - 若未安装，两个按钮均可用。
         """
+        self.refresh_workspace_label()
         result = self.component.detect()
         if result.installed:
             ver = result.version_text or "未知版本"
@@ -2541,12 +2777,17 @@ class ComponentCard(QFrame):
             )
             return
 
-        # 尝试查找本地已解压目录
-        install_root = CONFIG_DIR / self.component.key
-        if install_root.exists() and any(
-            p for p in install_root.iterdir()
-            if p.is_dir() and not p.name.startswith(".") and p.name != "downloads"
-        ):
+        # 尝试查找本地已解压目录（当前工作空间优先，兼容默认根里的旧安装）
+        local_found = False
+        for root in WS.roots_for(self.component.key, self.component.category):
+            install_root = root / self.component.key
+            if install_root.exists() and any(
+                p for p in install_root.iterdir()
+                if p.is_dir() and not p.name.startswith(".") and p.name != "downloads"
+            ):
+                local_found = True
+                break
+        if local_found:
             self.status_label.setText("● 已下载，未配置")
             self.status_label.setStyleSheet(
                 "color:#ef6c00;font-weight:600;padding:2px 8px;"
@@ -2648,7 +2889,7 @@ class ComponentCard(QFrame):
                 # 独立可执行文件（如 AppImage）：保留原始后缀，没有则用 .bin
                 suffix = "".join(PurePosixPath(urlparse(url).path).suffixes) or ".bin"
 
-        download_dir = CONFIG_DIR / self.component.key / "downloads"
+        download_dir = self.component.workspace_root() / self.component.key / "downloads"
         ensure_dir(download_dir)
         dest = download_dir / f"{self.component.key}-{cv.version}{suffix}"
 
@@ -2683,7 +2924,7 @@ class ComponentCard(QFrame):
         self.btn_cancel.setVisible(False)
 
         try:
-            target_root = CONFIG_DIR / self.component.key
+            target_root = self.component.workspace_root() / self.component.key
             ensure_dir(target_root)
             final = self.component.install_dir(cv.version)
 
@@ -2881,19 +3122,23 @@ class ComponentCard(QFrame):
 
     # ------------------------------------------------------------------
     def on_configure_clicked(self) -> None:
-        """仅配置环境变量：从本地已存在的安装目录中选择最新一个。"""
-        install_root = CONFIG_DIR / self.component.key
-        if not install_root.exists():
-            self._log("warn", "尚未下载，请先执行“下载并安装”。")
+        """仅配置环境变量：从本地已存在的安装目录中选择最新一个。
+
+        扫描顺序为当前工作空间优先、默认根兜底，旧位置的安装仍可被配置。
+        """
+        for root in WS.roots_for(self.component.key, self.component.category):
+            install_root = root / self.component.key
+            if not install_root.exists():
+                continue
+            candidates = [p for p in install_root.iterdir() if p.is_dir() and not p.name.startswith(".")
+                          and p.name != "downloads"]
+            if not candidates:
+                continue
+            candidates.sort()
+            self._configure_env(candidates[-1])
+            self._detect_status()
             return
-        candidates = [p for p in install_root.iterdir() if p.is_dir() and not p.name.startswith(".")
-                      and p.name != "downloads"]
-        if not candidates:
-            self._log("warn", "未找到已解压的安装目录。")
-            return
-        candidates.sort()
-        self._configure_env(candidates[-1])
-        self._detect_status()
+        self._log("warn", "未找到已解压的安装目录，请先执行“下载并安装”。")
 
     # ------------------------------------------------------------------
     def _configure_env(self, install_path: Path) -> None:
@@ -3247,6 +3492,175 @@ class AboutDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# 工作空间设置对话框
+# ---------------------------------------------------------------------------
+class WorkspaceDialog(QDialog):
+    """工作空间设置：全局默认 + 分类目录 + 组件自定义覆盖清单。
+
+    修改即时生效并落盘；关闭时若有过修改则以 Accepted 返回，供主窗口刷新卡片。
+    """
+
+    def __init__(self, parent=None, log_cb=None, names=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("工作空间")
+        self.setMinimumWidth(660)
+        self.setObjectName("workspaceDialog")
+        self._log_cb = log_cb
+        self._names = names or {}
+        self.changed = False
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    def _build_ui(self) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 20, 24, 18)
+        outer.setSpacing(12)
+
+        tip = QLabel(
+            "安装位置解析优先级：组件自定义 ＞ 分类工作空间 ＞ 全局默认 ＞ 内置默认目录。"
+            "修改立即生效；已安装的组件保持原地不动，不会自动迁移。"
+        )
+        tip.setWordWrap(True)
+        tip.setStyleSheet("font-size:13px;color:#546e7a;")
+        outer.addWidget(tip)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        v = QVBoxLayout(body)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(14)
+
+        # 全局默认
+        grp = QGroupBox("全局默认工作空间")
+        g = QGridLayout(grp)
+        g.setColumnStretch(1, 1)
+        self._global_label = QLabel()
+        self._global_label.setStyleSheet("color:#263238;")
+        g.addWidget(QLabel("所有组件"), 0, 0)
+        g.addWidget(self._global_label, 0, 1)
+        btn = QPushButton("浏览…")
+        btn.setObjectName("secondaryBtn")
+        btn.setCursor(QCursor(Qt.PointingHandCursor))
+        btn.clicked.connect(lambda: self._browse(
+            "选择全局默认工作空间",
+            str(WS.global_ws or CONFIG_DIR),
+            lambda p: WS.set_global(p),
+            "全局默认工作空间",
+        ))
+        g.addWidget(btn, 0, 2)
+        btn = QPushButton("恢复默认")
+        btn.setObjectName("secondaryBtn")
+        btn.setCursor(QCursor(Qt.PointingHandCursor))
+        btn.clicked.connect(lambda: self._reset(
+            lambda: WS.set_global(None), "全局默认工作空间"))
+        g.addWidget(btn, 0, 3)
+        v.addWidget(grp)
+
+        # 分类工作空间
+        grp = QGroupBox("分类工作空间（留空表示跟随全局）")
+        g = QGridLayout(grp)
+        g.setColumnStretch(1, 1)
+        self._cat_labels: Dict[str, QLabel] = {}
+        for row, cat in enumerate(CATEGORY_ORDER):
+            g.addWidget(QLabel(CATEGORIES[cat]), row, 0)
+            lab = QLabel()
+            lab.setStyleSheet("color:#263238;")
+            self._cat_labels[cat] = lab
+            g.addWidget(lab, row, 1)
+            btn = QPushButton("浏览…")
+            btn.setObjectName("secondaryBtn")
+            btn.setCursor(QCursor(Qt.PointingHandCursor))
+            btn.clicked.connect(lambda _=False, c=cat: self._browse(
+                f"选择「{CATEGORIES[c]}」的工作空间",
+                str(WS.categories.get(c) or WS.global_ws or CONFIG_DIR),
+                lambda p, c=c: WS.set_category(c, p),
+                f"分类「{CATEGORIES[c]}」工作空间",
+            ))
+            g.addWidget(btn, row, 2)
+            btn = QPushButton("跟随全局")
+            btn.setObjectName("secondaryBtn")
+            btn.setCursor(QCursor(Qt.PointingHandCursor))
+            btn.clicked.connect(lambda _=False, c=cat: self._reset(
+                lambda c=c: WS.set_category(c, None), f"分类「{CATEGORIES[c]}」工作空间"))
+            g.addWidget(btn, row, 3)
+        v.addWidget(grp)
+
+        # 组件自定义覆盖
+        grp = QGroupBox("组件自定义目录（在组件卡片点文件夹按钮设置，此处可清除）")
+        self._override_box = QVBoxLayout(grp)
+        self._override_box.setSpacing(6)
+        v.addWidget(grp)
+
+        v.addStretch(1)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, stretch=1)
+
+        btn = QPushButton("关闭")
+        btn.setObjectName("primaryBtn")
+        btn.setCursor(QCursor(Qt.PointingHandCursor))
+        btn.setFixedHeight(36)
+        btn.clicked.connect(lambda: self.accept() if self.changed else self.reject())
+        outer.addWidget(btn, alignment=Qt.AlignRight)
+
+        self._refresh()
+
+    # ------------------------------------------------------------------
+    def _browse(self, title: str, current: str, apply_cb, what: str) -> None:
+        chosen = QFileDialog.getExistingDirectory(self, title, current)
+        if not chosen:
+            return
+        apply_cb(chosen)
+        self.changed = True
+        self._refresh()
+        if self._log_cb:
+            self._log_cb("ok", f"工作空间已更新：{what} → {chosen}")
+
+    def _reset(self, apply_cb, what: str) -> None:
+        apply_cb()
+        self.changed = True
+        self._refresh()
+        if self._log_cb:
+            self._log_cb("ok", f"工作空间已恢复默认：{what}")
+
+    # ------------------------------------------------------------------
+    def _refresh(self) -> None:
+        self._global_label.setText(WS.global_ws or f"内置默认（{CONFIG_DIR}）")
+        for cat, lab in self._cat_labels.items():
+            lab.setText(WS.categories.get(cat) or "跟随全局")
+        # 重建覆盖清单
+        while self._override_box.count():
+            item = self._override_box.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        if not WS.components:
+            empty = QLabel("暂无组件自定义目录。")
+            empty.setStyleSheet("color:#90a4ae;")
+            self._override_box.addWidget(empty)
+        for key, path in sorted(WS.components.items()):
+            row = QHBoxLayout()
+            name = QLabel(self._names.get(key, key))
+            name.setStyleSheet("color:#263238;font-weight:600;")
+            row.addWidget(name)
+            lab = QLabel(path)
+            lab.setStyleSheet("color:#546e7a;")
+            lab.setToolTip(path)
+            row.addWidget(lab, stretch=1)
+            btn = QPushButton("清除")
+            btn.setObjectName("secondaryBtn")
+            btn.setCursor(QCursor(Qt.PointingHandCursor))
+            btn.clicked.connect(lambda _=False, k=key: self._reset(
+                lambda k=k: WS.set_component(k, None),
+                f"组件「{self._names.get(k, k)}」自定义目录"))
+            row.addWidget(btn)
+            wrap = QWidget()
+            wrap.setLayout(row)
+            self._override_box.addWidget(wrap)
+
+
+# ---------------------------------------------------------------------------
 # 主窗口（无边框自定义标题栏）
 # ---------------------------------------------------------------------------
 class MainWindow(QMainWindow):
@@ -3268,6 +3682,12 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._apply_qss()
         self._load_settings()
+        self.refresh_status_bar()
+        if WS.migrated:
+            self._append_log(
+                "info",
+                f"设置已从旧工作目录迁移到 {SETTINGS_FILE}（旧文件保留未删除）",
+            )
         self._start_fetch_versions()
 
     # ------------------------------------------------------------------
@@ -3309,6 +3729,16 @@ class MainWindow(QMainWindow):
         self.btn_refresh.setToolTip("重新从官网抓取所有组件的可用版本列表")
         self.btn_refresh.clicked.connect(self._start_fetch_versions)
         tb.addWidget(self.btn_refresh)
+
+        # 工作空间设置（图标代码绘制，避免 emoji 缺字形显示为方格）
+        self.btn_workspace = QPushButton("工作空间")
+        self.btn_workspace.setIcon(folder_icon(14))
+        self.btn_workspace.setIconSize(QSize(14, 14))
+        self.btn_workspace.setObjectName("iconBtn")
+        self.btn_workspace.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_workspace.setToolTip("配置全局 / 分类 / 单组件的安装目录")
+        self.btn_workspace.clicked.connect(self._on_workspace_clicked)
+        tb.addWidget(self.btn_workspace)
 
         # 捐赠图标（不在 README 中提及）
         self.btn_donate = QPushButton("♥")
@@ -3434,9 +3864,9 @@ class MainWindow(QMainWindow):
         sb = QHBoxLayout(self.status_bar)
         sb.setContentsMargins(14, 0, 14, 0)
         sb.setSpacing(0)
-        status_left = QLabel(f"系统：{CURRENT_OS} ({MACHINE})   工作目录：{CONFIG_DIR}")
-        status_left.setStyleSheet("color:#9aa0ad;background:none;border:none;")
-        sb.addWidget(status_left)
+        self.status_left = QLabel()
+        self.status_left.setStyleSheet("color:#9aa0ad;background:none;border:none;")
+        sb.addWidget(self.status_left)
         sb.addStretch(1)
         status_version = QLabel(f"版本号 {APP_VERSION}")
         status_version.setStyleSheet("color:#9aa0ad;background:none;border:none;")
@@ -3669,16 +4099,29 @@ class MainWindow(QMainWindow):
 
             QScrollBar:vertical {
                 background: transparent;
-                width: 10px;
-                margin: 4px 0;
+                width: 6px;
+                margin: 3px 0;
             }
             QScrollBar::handle:vertical {
-                background: #b0bec5;
-                border-radius: 5px;
-                min-height: 30px;
+                background: #e53935;
+                border-radius: 3px;
+                min-height: 24px;
             }
-            QScrollBar::handle:vertical:hover { background: #90a4ae; }
+            QScrollBar::handle:vertical:hover { background: #c62828; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+
+            QScrollBar:horizontal {
+                background: transparent;
+                height: 6px;
+                margin: 0 3px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #e53935;
+                border-radius: 3px;
+                min-width: 24px;
+            }
+            QScrollBar::handle:horizontal:hover { background: #c62828; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 
             QToolTip {
                 background: #37474f;
@@ -3798,6 +4241,23 @@ class MainWindow(QMainWindow):
         AboutDialog(self).exec()
 
     # ------------------------------------------------------------------
+    def _on_workspace_clicked(self) -> None:
+        names = {c.key: c.display_name for c in self.components}
+        dlg = WorkspaceDialog(self, self._append_log, names)
+        if dlg.exec() == QDialog.Accepted:
+            # 有过修改：刷新全部卡片徽章与安装位置提示
+            for card in self.cards:
+                card._detect_status()
+            self.refresh_status_bar()
+
+    # ------------------------------------------------------------------
+    def refresh_status_bar(self) -> None:
+        self.status_left.setText(
+            f"系统：{CURRENT_OS} ({MACHINE})   工作目录：{WS.global_ws or CONFIG_DIR}"
+            "（可在「工作空间」修改）"
+        )
+
+    # ------------------------------------------------------------------
     def _append_log(self, level: str, msg: str) -> None:
         color = {
             "info": "#dcdcdc",
@@ -3810,10 +4270,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _load_settings(self) -> None:
         """加载上次选择的版本。"""
-        if not CONFIG_FILE.exists():
+        if not SETTINGS_FILE.exists():
             return
         try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
             selections = data.get("selections", {})
             for card in self.cards:
                 v = selections.get(card.component.key)
@@ -3825,17 +4285,11 @@ class MainWindow(QMainWindow):
             pass
 
     def _save_settings(self) -> None:
-        try:
-            ensure_dir(CONFIG_DIR)
-            data = {
-                "selections": {
-                    card.component.key: card.version_combo.currentText()
-                    for card in self.cards
-                }
-            }
-            CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass
+        # 与 workspace 段同存于 ~/.murig/config.json
+        WS.save({
+            card.component.key: card.version_combo.currentText()
+            for card in self.cards
+        })
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
@@ -3852,7 +4306,6 @@ def main() -> int:
     )
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    ensure_dir(CONFIG_DIR)
     win = MainWindow()
     win.show()
     return app.exec()

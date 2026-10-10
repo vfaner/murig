@@ -103,8 +103,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "MuRig",
             "CFBundleDisplayName": "MuRig - 编程开发环境自动装配小工具",
-            "CFBundleShortVersionString": "1.1.0",
-            "CFBundleVersion": "1.1.0",
+            "CFBundleShortVersionString": "1.2.0",
+            "CFBundleVersion": "1.2.0",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "10.13.0",
         },

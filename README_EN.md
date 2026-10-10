@@ -1,204 +1,153 @@
 # MuRig — Automated Developer Environment Setup
 
-A cross-platform desktop GUI tool built with Python + PySide6 that automates the download, extraction and environment-variable configuration of common developer toolchains. Save yourself from tedious manual installation.
+<p align="center">
+  <img src="assets/murig.png" alt="MuRig main window" width="760"/>
+</p>
 
-> Project: **MuRig**
-> Author: [**沐编程**](https://nav.qqmu.com)
-> Platforms: Windows 10/11, macOS 12+, Ubuntu 20.04+
-> License: MIT License
+<p align="center">
+  A cross-platform desktop GUI tool built with <b>Python + PySide6</b> that automates the<br/>
+  <b>download → extraction → environment-variable configuration</b> of common developer toolchains.
+</p>
+
+> Project: **MuRig** · Author: [**沐编程**](https://nav.qqmu.com) · Platforms: Windows 10/11, macOS 12+, Ubuntu 20.04+ · License: MIT
 
 ---
 
-## 1. Features
+## 1. Download & run (recommended)
 
-- 🖥️ **Cross-platform.** Detects Windows / macOS / Linux (and x64 / arm64) at runtime and picks the correct distribution.
-- 🗂️ **Categories & global search.** Components are organized into six categories — **Java / Python / Frontend / Databases / Big Data / AI**. Click a category chip to filter, or type a software name, alias (e.g. `es`, `cache`) or category name (e.g. `database`) into the search box for fuzzy matching; chips and keywords can be combined.
-- 📦 **One-click provisioning.** 29 preloaded components — the whole pipeline (download → unpack/build → configure) is automated:
-    - **Java:** JDK (Adoptium Temurin — 21 / 17 / 11 / 8), Apache Maven, Apache Tomcat
-    - **Python:** Python (3.12 / 3.11 / 3.10 / 3.9), Miniconda
-    - **Frontend:** Node.js (20 / 18 / 16), Git
-    - **Databases:** MySQL, MariaDB (12.3 / 11.4 LTS / 10.11 LTS), SQL Server 2025 Express (Windows online bootstrapper, guided), PostgreSQL (EDB binaries on Win/macOS; source auto-build on Linux), Redis (source auto-`make` on macOS/Linux; community Windows port), Elasticsearch (8.15 / 7.17), openGauss (Linux only), DaMeng DM8 (ISO extracted, GUI installer guided), OceanBase (Linux only; RPM unpacked in pure Python), TiDB (Linux only, x86_64/arm64), KingbaseES (Linux only; portable server tar with built-in license; Referer header sent automatically), YashanDB (Linux only; yasboot init)
-    - **Big Data:** Hadoop, ZooKeeper, Hive, HBase, Spark, Flink, Kafka
-    - **AI:** Ollama (local LLM runtime), Claude Code (portable npm install — Node.js required), CC-Switch (portable zip / .app / AppImage)
-- 🔍 **Smart detection.** Checks whether `JAVA_HOME` and friends already exist and are valid; missing/invalid entries are flagged for reconfiguration.
-- 🛠️ **Environment-variable management.**
-    - Windows: writes to `HKCU\Environment` via `winreg` and refreshes with `setx`.
-    - macOS / Linux: appends idempotent `export` blocks (with begin/end markers) to `.zshrc` / `.bash_profile` / `.bashrc` / `.profile`.
-- 📊 **Live feedback.** Progress bar with real-time byte counts, cancel support, colour-coded log output (info / ok / warn / error).
-- 🎨 **Modern UI.** Frameless custom title bar, rounded cards with drop shadows, gradient progress bars, hover/press animations.
+**No Python, no source — just double-click.** Grab the build for your system from the **[Releases page](https://github.com/vfaner/murig/releases/latest)**:
+
+| System | File | Notes |
+|--------|------|-------|
+|  Windows | `murig.exe` | double-click, no installer |
+| 🍎 macOS (Apple Silicon) | `murig-macos-arm64.zip` | unzip, open `murig.app` |
+| 🍎 macOS (Intel) | `murig-macos-x64.zip` | unzip, open `murig.app` |
+| 🐧 Linux (x64) | `murig-linux-x64` | `chmod +x` then run |
+
+First launch: macOS may block the unsigned app — click **"Open Anyway"** under *System Settings → Privacy & Security*, or run `xattr -cr murig.app`. On Windows, SmartScreen → **"More info → Run anyway"**.
+
+---
+
+## 2. Features
+
+- 🖥️ **Cross-platform.** Detects Windows / macOS / Linux and x64 / arm64 at runtime, picks the correct official distribution.
+- 📦 **One-click provisioning.** 29 components — language runtimes, build tools, relational & Chinese-domestic databases, the big-data stack and AI CLIs — downloaded, extracted (or compiled) and wired into your environment automatically.
+- 🗂️ **Categories & search.** Six category chips; the search box fuzzy-matches names, aliases (`es`, `cache`) and category names (`database`).
+- 🌐 **Live versions.** Version lists are fetched from official APIs/archives at startup and can be filtered by typing; on failure the built-in list is used, so the tool works offline.
+- 🔍 **Smart detection.** Checks `XXX_HOME` → `PATH` → well-known install paths; configured components show ✓ and are never re-written.
+- 🛠️ **Env-var management.** Windows: `winreg` registry writes (bypasses the `setx` 1024-char limit). macOS/Linux: idempotent marked blocks in your shell rc files.
+- 📁 **Configurable workspace.** Global / per-category / per-component install directories — see [Workspace](#7-workspace-install-directories).
+- 🎨 **Modern UI.** Frameless window, rounded cards, gradient progress bars, colour-coded log.
 - 🧠 **Preferences memory.** Remembers the last selected version per component.
 
 ---
 
-## 2. Screenshot (ASCII sketch)
+## 3. Supported components
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│  MuRig By 沐编程                         About — ▢ × │
-├───────────────────────────────────────────────────────────────┤
-│  ┌─ JDK (Temurin) ────────────────────────────────────────┐   │
-│  │  Configured: JAVA_HOME=/Users/x/.env-tools/jdk/jdk-17  │   │
-│  │  Version [17 ▾]   [Install]  [Configure Only]  [Cancel]│   │
-│  │  ████████████████░░░░░  85%                            │   │
-│  └────────────────────────────────────────────────────────┘   │
-│                                                                │
-│  Log:                                                          │
-│  [JDK] Downloading https://api.adoptium.net/v3/binary/...      │
-│  [JDK] Extracted to /Users/x/.env-tools/jdk/jdk-17             │
-│  [JDK] JAVA_HOME set                                           │
-└───────────────────────────────────────────────────────────────┘
-```
+> Tables in the Chinese README list default versions; at startup every list is refreshed from the official source. Big-data components require JDK — install it first.
+
+- **Java:** JDK (Adoptium Temurin), Apache Maven, Apache Tomcat
+- **Python:** Python, Miniconda (silent installer)
+- **Frontend:** Node.js, Git
+- **Databases:** MySQL, MariaDB, SQL Server 2025 Express (Windows bootstrapper, guided), PostgreSQL (source build on Linux), Redis (source `make` on macOS/Linux), Elasticsearch, openGauss, DaMeng DM8 (ISO extracted, guided), OceanBase (pure-Python RPM unpack), TiDB, KingbaseES (portable server tar), YashanDB — the last five are Linux-only
+- **Big Data:** Hadoop, ZooKeeper, Hive, HBase, Spark, Flink, Kafka
+- **AI:** Ollama, Claude Code (portable npm install, needs Node.js), CC-Switch
+
+Databases with no anonymous direct download are not bundled (apply on the vendor site): IBM DB2, HighGo, Vastbase, GBase, Oscar.
 
 ---
 
-## 3. Installation & Run
+## 4. Screenshots
 
-### Requirements
+<p align="center">
+  <img src="assets/murig_db_version.png" alt="version drop-down" width="760"/><br/>
+  <sub>Version drop-down: lists are fetched live from official sources and filter as you type</sub>
+</p>
 
-- Python **3.9+**
-- A virtual environment is recommended (venv / conda).
+<p align="center">
+  <img src="assets/murig_about.png" alt="about dialog" width="760"/><br/>
+  <sub>About dialog: contact channels and product navigation</sub>
+</p>
 
-### Clone and install
+---
+
+## 5. Run from source
 
 ```bash
-git clone https://github.com/yourname/murig.git
+git clone https://github.com/vfaner/murig.git
 cd murig
-
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-```
-
-### Launch
-
-```bash
+pip install -r requirements.txt   # PySide6 + requests
 python main.py
 ```
 
-The working directory `~/.env-tools/` is created automatically on first launch and stores downloaded archives and extracted components.
+- Python 3.9+; the working directory (default `~/.env-tools/`) is created on first launch and can be moved in the Workspace dialog.
+- Redis on macOS/Linux and PostgreSQL on Linux need `make` + a C compiler; Claude Code needs Node.js first.
+
+Layout: `<workspace>/<component>/downloads/` for archives, `<workspace>/<component>/<component>-<version>/` for the extracted tool.
 
 ---
 
-## 4. Usage
+## 6. Usage
 
-1. (Optional) Filter cards: click a category chip (e.g. **Big Data**) or type a name/alias/category keyword (e.g. `redis`, `es`, `database`) in the search box.
-2. Pick a version from the drop-down.
-3. Click **"Install"**:
-    - the archive is streamed and the progress bar updates continuously;
-    - it is extracted to `~/.env-tools/<component>/<component>-<version>/` (source packages like Redis are compiled automatically);
-    - the corresponding `XXX_HOME` variable is written and the executable's directory is appended to `PATH`.
-4. Already downloaded but not configured? Click **"Configure Only"**.
-5. All actions are echoed to the log panel.
+1. (Optional) Filter with a category chip or the search box.
+2. Pick a version — click, or type to filter (`21`, `3.12`, `LTS`).
+3. **Install**: streamed download (cancellable) → extraction (source packages compile automatically) → `XXX_HOME` written and `bin` appended to `PATH`.
+4. **Configure Only**: run just the env-var step for an already-downloaded component.
+5. Watch the colour-coded log for every step.
 
-### Applying variables
-
-- **Windows:** any new console window will see the fresh user variables. Restart already-open windows.
-- **macOS / Linux:**
-    ```bash
-    source ~/.zshrc     # or ~/.bashrc / ~/.bash_profile / ~/.profile
-    ```
-    or simply reopen a terminal.
-
-### Verifying
-
-```bash
-java -version
-mvn -v
-python --version
-node -v
-mysql --version
-```
+Apply variables: open a new terminal on Windows; `source ~/.zshrc` (or reopen the terminal) on macOS/Linux. Verify with `java -version`, `mvn -v`, `python --version`, `node -v`, `mysql --version`.
 
 ---
 
-## 5. Configuration
+## 7. Workspace (install directories)
 
-### Add / change component versions
+Everything installs under the built-in default `~/.env-tools/` (the C: drive on Windows). The title-bar **"Workspace"** button opens a dialog; locations resolve in this priority order:
 
-Edit `build_components()` inside `main.py`. Each component owns a list of `ComponentVersion` entries. Example — adding JDK 22:
+1. **Per component** — the folder-icon button on a card (right-click it to clear);
+2. **Per category** — one directory per category chip;
+3. **Global default** — one directory for everything;
+4. otherwise the built-in `~/.env-tools/`.
 
-```python
-for v in ("22", "21", "17", "11", "8"):
-    jdk_versions.append(ComponentVersion(
-        version=v,
-        url_map=_adoptium_jdk_url(v),
-        archive_map={"Windows": "zip", "Darwin": "tar.gz", "Linux": "tar.gz"},
-    ))
-```
+<p align="center">
+  <img src="assets/murig_work.png" alt="workspace dialog" width="760"/>
+</p>
 
-### Switch to a faster mirror
-
-If the official downloads are slow, replace the URL prefix with a regional mirror:
-
-- Huawei Cloud: `https://repo.huaweicloud.com/`
-- Tsinghua TUNA: `https://mirrors.tuna.tsinghua.edu.cn/`
-- Alibaba: `https://mirrors.aliyun.com/`
-
-### Change the working directory
-
-Update the constant at the top of `main.py`:
-
-```python
-CONFIG_DIR = Path.home() / ".env-tools"
-```
+- Settings live in `~/.murig/config.json`; the legacy `~/.env-tools/config.json` is migrated on first launch.
+- **Already-installed components stay where they are** — their env vars keep pointing at the old path.
+- Download caches follow the current workspace, so undownloaded components are fetched again after a change.
+- Every card shows its effective target as "Install to: …".
 
 ---
 
-## 6. FAQ
+## 8. Customize & package
 
-**Q1. Download stuck at some percentage?**
-Likely a slow mirror. Click **Cancel** and retry, or switch mirrors as described above.
-
-**Q2. Env-variable write fails?**
-- Windows: relaunch as Administrator if you need system-scope variables. The tool defaults to **user scope**, which usually doesn't require elevation.
-- macOS / Linux: make sure your shell rc files are writable.
-
-**Q3. Will my existing `JAVA_HOME` be overwritten?**
-Yes — the most recent installation wins. The new `bin` directory is appended to `PATH` idempotently.
-
-**Q4. `.tar.xz` / `.tar` / `.rpm` / AppImage archives?**
-`.tar.xz` is supported (MySQL Linux distribution uses it). KingbaseES portable builds carry a `.tar` suffix but are in fact gzip-compressed; the extractor opens them with `tarfile` mode `r:*`, which sniffs the real format by magic bytes (genuine uncompressed tar works too). RPM packages (e.g. OceanBase) are unpacked with a built-in pure-Python parser (xz/lzma + cpio), so no system `rpm2cpio` is needed. AppImages (e.g. CC-Switch on Linux) are downloaded as-is and marked executable — a system with FUSE support is required to run them.
-
-**Q5. Which Chinese/domestic databases are supported?**
-- **DaMeng DM8:** official packages are zip-wrapped ISO images; the tool extracts the ISO, then instructs you to mount it and run the vendor installer (a system-level, interactive step).
-- **openGauss / OceanBase / TiDB / KingbaseES / YashanDB (Linux only):** downloaded and unpacked automatically; instance initialization is documented in the post-install notes (KingbaseES sends a `Referer` header to pass the vendor's OSS hotlink protection).
-- **Not bundled (no anonymous direct download — apply on the vendor site):** IBM DB2 (Fix Central requires an IBMid), HighGo (name/phone/SMS/email), Vastbase (name/phone/SMS/company/MAC, 90-day MAC-bound license), GBase (login + enterprise real-name verification), Oscar/神通 (login-only download page with no public files).
-
-**Q6. Claude Code install fails: `npm` not found?**
-Install Node.js first (available as a component in this tool), then click Install on the Claude Code card again.
-
-**Q7. `setx` truncation on Windows?**
-The tool bypasses `setx`'s 1024-char limit by writing to the registry with `winreg`.
+- **Add components / versions:** edit `build_components()` in `main.py`; lists are offline defaults, overwritten by the live fetch at startup.
+- **Faster mirrors:** swap URL prefixes for Huawei Cloud, Tsinghua TUNA or Alibaba mirrors.
+- **Local build:** `pip install pyinstaller && pyinstaller murig.spec --noconfirm --clean`.
+- **Releases:** pushing a tag (e.g. `git tag v1.2.0 && git push origin v1.2.0`) makes GitHub Actions build Windows / macOS (arm64 + x64) / Linux artifacts and publish them.
 
 ---
 
-## 7. Notes & caveats
+## 9. FAQ
 
-- Official download URLs may change over time. If a link 404s, update the URL for that version in `main.py`.
-- Some components (e.g. MySQL) require additional post-install steps such as `mysqld --initialize`. This tool only covers **download + extraction + env-var configuration**.
-- Prefer a virtual environment to avoid polluting your system Python.
+**Version fetch fails / download stuck?** The built-in version list is used as fallback, so nothing breaks; cancel and retry a stuck download, or switch mirrors.
 
----
+**Env-var write fails / will old values be overwritten?** Windows writes user-scope variables, usually without admin rights — rerun as administrator if needed. Re-installing overwrites `XXX_HOME` with the newest path; `PATH` entries are appended once, never duplicated.
 
-## 8. Project layout
+**Is MySQL usable right after extraction?** No — run `mysqld --initialize` yourself. The tool covers download + extraction + env vars only.
 
-```
-murig/
-├─ main.py             # entry point (UI + logic)
-├─ requirements.txt    # dependency list
-├─ README.md           # Chinese documentation
-├─ README_EN.md        # English documentation (this file)
-└─ assets/             # (optional) icons and other resources
-```
+**Archive formats?** `.zip`, `.tar.gz`, `.tar.xz`, magic-byte-sniffed `.tar` (KingbaseES is gzip in disguise), RPM (pure-Python unpack for OceanBase) and AppImage (needs FUSE).
+
+**Claude Code: `npm` not found?** Install Node.js from the Frontend category first.
 
 ---
 
-## 9. License
+## 10. License
 
-This project is released under the **MIT License**. Copyright © 2026 [**沐编程**](https://nav.qqmu.com).
+MIT License. Copyright © 2026 [**沐编程**](https://nav.qqmu.com). See [LICENSE](LICENSE).
 
-See the [LICENSE](LICENSE) file in the repository root for the full text, or visit <https://opensource.org/licenses/MIT>.
+---
+
+<p align="center">
+  Made with ❤️ by <b><a href="https://nav.qqmu.com">沐编程</a></b>
+</p>
