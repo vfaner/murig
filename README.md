@@ -25,7 +25,7 @@
 
 原项目由 [沐编程](https://nav.qqmu.com) 开源（MIT 协议），已实现"下载 → 解压 → 环境变量配置"的完整链路。本仓库在其 v1.2.0 基础上进行二次开发：沿用原有核心能力，**新增并修复了部分功能，让日常使用更顺手**，同时保留原作者的署名与授权。
 
-当前版本 **v1.2.2**，仓库与发布页：[github.com/walnut233/murig](https://github.com/walnut233/murig/releases/latest)；应用内「设置 → 安装与更新 → 检查更新」也可查询最新版本。
+当前版本 **v1.2.3**，仓库与发布页：[github.com/walnut233/murig](https://github.com/walnut233/murig/releases/latest)；应用内「设置 → 安装与更新 → 检查更新」也可查询最新版本。
 
 
 ### ✨ 相对 MuRig v1.2.0 的改动
@@ -44,7 +44,8 @@
 | 🔧 优化 | **按钮配色收敛**：白底蓝字的次级按钮（浏览 / 重置 / 打开 / 测速 / 立即清理 / 检查更新等）改为中性灰，蓝色只留给主操作与交互反馈 |
 | 🔧 优化 | **界面图标统一**：关于 / 刷新 / 设置 / 目录按钮改用统一的 SVG 图标包（`assets/icons`），按调用处注入填充色 |
 | 🔧 优化 | **关于我们**：新增应用图标与项目溯源，并标注本项目仓库地址与发布页；顶栏「支持作者」弹窗合并进「关于我们」（本版本已移除该打赏区块与二维码资源，相关内容回归原项目） |
-| 🔧 优化 | **打包体积 47.9MB → 27.7MB**：剔除用不到的 Qt 组件（opengl32sw 软件渲染兜底、Qml/Quick 全家桶、Qt6Pdf / Network / OpenGL、Qt 多语言翻译等），截图不再进包 |
+| 🆕 新增 | **内置 MiSans 字体**：界面默认用小米开源的 MiSans（Regular + Demibold 两个字重）渲染，跨系统版式一致；设置里「使用系统字体」开关可随时切回系统字体，切换即时生效 |
+| 🔧 优化 | **打包体积 47.9MB → 38.1MB**：剔除用不到的 Qt 组件（opengl32sw 软件渲染兜底、Qml/Quick 全家桶、Qt6Pdf / Network / OpenGL、Qt 多语言翻译等），截图不再进包（不含内置字体时为 27.7MB） |
 | 🐛 修复 | 环境变量窗口此前以普通权限打开，系统变量只读且无提权提示；改为 `ShellExecute(runas)` 提权启动 |
 
 ---
@@ -255,7 +256,7 @@ python main.py
 - **更换镜像**：设置弹窗里直接选通道或填自定义前缀（华为云 `repo.huaweicloud.com`、清华 TUNA `mirrors.tuna.tsinghua.edu.cn`、阿里云 `mirrors.aliyun.com`）
 - **更换图标**：替换 `assets/icons/*.svg`（关于 / 刷新 / 设置 / 文件夹），`murig/ui/icons.py` 会自动注入填充色
 - **本地打包**：`pip install pyinstaller && pyinstaller murig.spec --noconfirm --clean`
-- **自动发布**：推 tag（如 `git tag v1.2.2 && git push origin v1.2.2`），GitHub Actions 在 Windows / macOS (arm64 + x64) / Linux 上打包并自动创建 Release，产物见 [Releases](https://github.com/walnut233/murig/releases/latest)
+- **自动发布**：推 tag（如 `git tag v1.2.3 && git push origin v1.2.3`），GitHub Actions 在 Windows / macOS (arm64 + x64) / Linux 上打包并自动创建 Release，产物见 [Releases](https://github.com/walnut233/murig/releases/latest)
 - **体积控制**：`murig.spec` 在 Analysis 之后按名字剔除用不到的 Qt 二进制与翻译（Qml/Quick、opengl32sw、Qt6Pdf / Network / OpenGL、translations 等），截图只进 README 不进包；保留 `Qt6Svg`（卡片图标）、`libssl` / `libcrypto`（下载用）与内置字体。当前单文件产物约 **38.1MB**（Windows，含 MiSans 字体；不含字体约 27.7MB）
 
 ---

@@ -14,7 +14,7 @@ from typing import Dict, List
 APP_NAME = "MuRig - 编程开发环境自动装配小工具"
 
 
-APP_VERSION = "v1.2.2"
+APP_VERSION = "v1.2.3"
 
 
 # 本项目仓库地址（检查更新、关于我们共用）
