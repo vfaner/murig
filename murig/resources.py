@@ -29,6 +29,11 @@ def icon_path() -> Path:
     return assets_dir() / "icon.ico"
 
 
+def fonts_dir() -> Path:
+    """内置字体目录（assets/fonts/*.ttf，如 MiSans 字重）。"""
+    return assets_dir() / "fonts"
+
+
 def styles_dir() -> Path:
     """样式表目录。"""
     return Path(__file__).resolve().parent / "ui" / "styles"

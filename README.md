@@ -81,6 +81,7 @@
 - 📂 **打开目录 / 安装包清理**：随时打开工作空间目录；组件解压安装后可选自动清理下载的压缩包（默认开）
 - 🔄 **检查更新**：设置里手动查询本项目最新 Release，有新版本时给出更新说明并跳转发布页
 - 🎨 **现代化 UI**：无边框窗口、圆角卡片、渐变进度条、四色分级日志
+- 🅰️ **内置 MiSans 字体**：界面默认用小米开源的 MiSans 渲染，跨系统版式一致；设置里可一键切回系统字体
 - 🧠 **偏好记忆**：记住每个组件上次选择的版本，下次启动自动恢复
 
 ---
@@ -237,6 +238,8 @@ python main.py
 
 没有为任何组件单独指定目录时，「组件自定义目录」一栏会自动隐藏，设置弹窗更紧凑；弹窗默认高度也不会超过主窗口。
 
+**界面字体**：默认使用内置 MiSans（Regular + Demibold 两个字重），所有系统上版式一致；打开「使用系统字体」则跟随操作系统（Windows 雅黑 / macOS 苹方），切换立即生效、无需重启。
+
 说明：
 
 - 设置保存在 `~/.murig/config.json`，旧版 `~/.env-tools/config.json` 首次启动自动迁移；
@@ -253,7 +256,7 @@ python main.py
 - **更换图标**：替换 `assets/icons/*.svg`（关于 / 刷新 / 设置 / 文件夹），`murig/ui/icons.py` 会自动注入填充色
 - **本地打包**：`pip install pyinstaller && pyinstaller murig.spec --noconfirm --clean`
 - **自动发布**：推 tag（如 `git tag v1.2.2 && git push origin v1.2.2`），GitHub Actions 在 Windows / macOS (arm64 + x64) / Linux 上打包并自动创建 Release，产物见 [Releases](https://github.com/walnut233/murig/releases/latest)
-- **体积控制**：`murig.spec` 在 Analysis 之后按名字剔除用不到的 Qt 二进制与翻译（Qml/Quick、opengl32sw、Qt6Pdf / Network / OpenGL、translations 等），截图只进 README 不进包；保留 `Qt6Svg`（卡片图标）与 `libssl` / `libcrypto`（下载用）。当前单文件产物约 **27.7MB**（Windows）
+- **体积控制**：`murig.spec` 在 Analysis 之后按名字剔除用不到的 Qt 二进制与翻译（Qml/Quick、opengl32sw、Qt6Pdf / Network / OpenGL、translations 等），截图只进 README 不进包；保留 `Qt6Svg`（卡片图标）、`libssl` / `libcrypto`（下载用）与内置字体。当前单文件产物约 **38.1MB**（Windows，含 MiSans 字体；不含字体约 27.7MB）
 
 ---
 
@@ -293,6 +296,7 @@ murig/
 └── assets/                             # 截图与界面图标
     ├── icons/                          # 界面 SVG 图标（info-circle / reload / setting / folder）
     ├── icon.ico                        # 应用图标（窗口 / 任务栏 / exe）
+    ├── fonts/                          # 内置界面字体（MiSans Regular / Demibold）
     ├── murig.png                       # 主界面截图
     ├── murig_db_version.png            # 版本下拉框截图
     ├── murig_work.png                  # 设置弹窗截图
@@ -305,6 +309,7 @@ murig/
 
 - 本仓库为 **二次开发版本**，基于 [MuRig v1.2.0](https://github.com/vfaner/murig) 制作演变而来；
 - 原项目版权所有 © 2026 [**沐编程**](https://nav.qqmu.com)，以 **MIT License** 开源，本仓库沿用该协议并保留原作者署名；
+- 内置界面字体 [MiSans](https://hyperos.mi.com/font/)版权归 **小米** 所有，按其官方声明免费商用（含打包分发）；
 - 完整条款见 [LICENSE](LICENSE)。
 
 欢迎 ⭐ Star、🐛 提 Issue、🔀 提 PR。

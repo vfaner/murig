@@ -18,10 +18,11 @@ from ..core.constants import (
     REPO_URL,
 )
 from ..core.mirrors import MIRRORS, PRESETS
-from ..core.settings import INSTALL
+from ..core.settings import INSTALL, UI
 from ..core.updates import is_newer
 from ..core.utils import human_size, open_in_file_manager
 from ..core.workers import MirrorProbeWorker, UpdateCheckWorker
+from .fonts import MISANS_FAMILY, apply_app_font, misans_available
 from ..core.workspace import WS
 from ..resources import icon_path
 from .widgets import ToggleSwitch
@@ -376,6 +377,27 @@ class WorkspaceDialog(QDialog):
         g.addWidget(self._update_btn, 3, 1)
         v.addWidget(grp)
 
+        # 界面字体：默认用内置 MiSans，打开开关则回系统字体
+        grp = QGroupBox("界面字体")
+        g = QGridLayout(grp)
+        g.setColumnStretch(0, 1)
+        g.setHorizontalSpacing(12)
+        g.setVerticalSpacing(8)
+        self._sysfont_box = ToggleSwitch("使用系统字体（关闭时使用内置 MiSans）")
+        self._sysfont_box.setChecked(UI.system_font)
+        self._sysfont_box.setToolTip(
+            "关闭时使用内置的 MiSans 渲染界面，避免不同系统字体导致的版式差异；"
+            "打开则跟随系统界面字体（Windows 雅黑 / macOS 苹方 / Linux 桌面字体）"
+        )
+        self._sysfont_box.toggled.connect(self._on_sysfont_changed)
+        g.addWidget(self._sysfont_box, 0, 0)
+        self._font_label = QLabel()
+        self._font_label.setObjectName("pathValue")
+        self._font_label.setWordWrap(True)
+        g.addWidget(self._font_label, 1, 0)
+        self._refresh_font_label()
+        v.addWidget(grp)
+
         v.addStretch(1)
         scroll.setWidget(body)
         outer.addWidget(scroll, stretch=1)
@@ -541,6 +563,32 @@ class WorkspaceDialog(QDialog):
                 "ok",
                 "安装包：安装完成后自动清理" if checked
                 else "安装包：安装完成后保留，需手动清理",
+            )
+
+    # ------------------------------------------------------------------
+    # 界面字体
+    # ------------------------------------------------------------------
+    def _refresh_font_label(self) -> None:
+        if UI.system_font:
+            self._font_label.setText("当前：系统字体（跟随操作系统界面字体）")
+        elif misans_available():
+            self._font_label.setText(f"当前：内置 {MISANS_FAMILY}")
+        else:
+            self._font_label.setText(
+                "当前：内置 MiSans（字体文件缺失，已回退系统字体）")
+
+    def _on_sysfont_changed(self, checked: bool) -> None:
+        UI.system_font = bool(checked)
+        UI.save()
+        # 立即换字体：QApplication.setFont 会广播给所有未单独设置字体的控件
+        app = QApplication.instance()
+        family = apply_app_font(app, UI.system_font) if app else ""
+        self._refresh_font_label()
+        if self._log_cb:
+            self._log_cb(
+                "ok",
+                f"界面字体已切换为：{'系统字体' if checked else '内置 MiSans'}"
+                f"（{family or '未指定'}）",
             )
 
     def _start_update_check(self) -> None:

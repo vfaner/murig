@@ -20,33 +20,20 @@ if sys.platform == "win32":
     os.environ.setdefault("QT_QPA_PLATFORM", f"windows:fontengine={_engine or 'directwrite'}")
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from .core.constants import APP_NAME, CURRENT_OS
+from .core.constants import APP_NAME
+from .core.settings import UI
 from .resources import icon_path
+from .ui.fonts import app_font
 from .ui.main_window import MainWindow
 from .ui.theme import apply_theme
 
 
-def _default_font() -> QFont | None:
-    """返回平台默认 UI 字体，并显式要求抗锯齿 + 亚像素渲染。"""
-    font = QFont()
-    if CURRENT_OS == "Windows":
-        font.setFamily("Microsoft YaHei UI")  # 雅黑 UI 版字距更松，小字号最清晰
-        font.setPointSize(10)
-    elif CURRENT_OS == "Darwin":
-        font.setFamily("PingFang SC")
-        font.setPointSize(13)
-    else:
-        return None
-    # 明确要求抗锯齿与高质量（亚像素）渲染：QSS 只覆盖 family/size，策略会被保留
-    font.setStyleStrategy(
-        QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality
-    )
-    # 全量 hinting：字模对齐像素网格，小字号中文笔画更实、不发虚
-    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-    return font
+def _default_font():
+    """应用字体：默认内置 MiSans，用户在设置里打开则用系统字体。"""
+    return app_font(UI.system_font)
 
 
 def _app_icon() -> QIcon | None:

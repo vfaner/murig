@@ -29,6 +29,8 @@ _version = re.search(
 datas = [
     (str(SPEC_DIR / "assets" / "icons"), "assets/icons"),
     (str(SPEC_DIR / "assets" / "icon.ico"), "assets"),
+    # 内置界面字体（MiSans 两个字重），缺失时自动回退系统字体
+    (str(SPEC_DIR / "assets" / "fonts"), "assets/fonts"),
     (str(SPEC_DIR / "murig" / "ui" / "styles"), "murig/ui/styles"),
 ]
 

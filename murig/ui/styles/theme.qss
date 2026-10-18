@@ -12,8 +12,8 @@
 
 /* ---------------------------- 基础 ---------------------------- */
 QWidget {
-    font-family: "Microsoft YaHei UI", "PingFang SC", "Hiragino Sans GB",
-                 "Helvetica Neue", Arial, sans-serif;
+    /* 不在这里写死 font-family：全局字体由 QApplication 决定
+       （默认内置 MiSans，设置里可切回系统字体），QSS 只管字号与颜色 */
     font-size: 10pt;
     color: #1f2430;
 }
