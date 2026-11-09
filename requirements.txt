@@ -1,2 +1,5 @@
 PySide6>=6.6.0
 requests>=2.31.0
+# Windows：让 requests/Qt 使用操作系统证书库，解决代理/加速器 MITM 的
+# CERTIFICATE_VERIFY_FAILED（见 murig/core/http.py 的证书降级策略）
+truststore>=0.9; sys_platform == "win32"

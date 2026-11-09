@@ -1,0 +1,389 @@
+/* ==========================================================================
+   MuRig 全局主题
+   --------------------------------------------------------------------------
+   设计令牌：
+     主色   #4f46e5 (indigo-600)   hover #4338ca
+     背景   #f7f9fc → #e9edf5 竖向渐变
+     卡片   #ffffff / 边框 #e8ecf3 / 圆角 14px
+     文字   主 #1f2430   次 #6b7280   弱 #9aa1ad
+     状态   ok #16a34a   warn #f59e0b   error #dc2626
+   规则：控件只设置 objectName，外观全部由此表描述。
+   ========================================================================== */
+
+/* ---------------------------- 基础 ---------------------------- */
+QWidget {
+    /* 不在这里写死 font-family：全局字体由 QApplication 决定
+       （默认内置 MiSans，设置里可切回系统字体），QSS 只管字号与颜色 */
+    font-size: 10pt;
+    color: #1f2430;
+}
+QMainWindow, QDialog { background: #f5f7fb; }
+
+QToolTip {
+    background: #232a3a;
+    color: #f2f4f8;
+    border: 1px solid #333c52;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 9pt;
+}
+
+/* ---------------------------- 主窗口 ---------------------------- */
+/* 根容器不画背景：中部渐变画在 #contentArea 上。
+   这样回退模式（透明窗口 + QSS 圆角）下，圆角缺口处不会露出浅色背景的白边。 */
+#centralRoot { background: transparent; }
+
+#contentArea {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #f7f9fc, stop:1 #e9edf5);
+}
+
+/* DWM 原生圆角模式下窗口保持不透明，取消 QSS 圆角；最大化同理 */
+#centralRoot[square="true"] #titleBar,
+#centralRoot[square="true"] #statusBar {
+    border-radius: 0px;
+}
+
+/* 注意：文字所在的背景必须是「不透明纯色」。
+   渐变 / 半透明背景会让 Windows 的亚像素抗锯齿退化为灰度抗锯齿，文字边缘发毛。 */
+#titleBar {
+    background: #2b3242;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+#titleText {
+    color: #f3f5fa;
+    font-size: 10.5pt;
+    font-weight: 700;
+    padding-left: 2px;
+}
+
+#iconBtn, #ctrlBtn, #closeBtn {
+    background: transparent;
+    color: #dbe1ec;
+    border: none;
+    border-radius: 8px;
+    font-size: 10pt;
+}
+#iconBtn { padding: 6px 12px; }
+/* 窗口控制按钮在代码里已固定尺寸，这里去掉内边距保证三个按钮完全一致 */
+#ctrlBtn, #closeBtn { padding: 0; }
+#iconBtn:hover, #ctrlBtn:hover { background: rgba(255,255,255,0.14); color: #ffffff; }
+#closeBtn:hover { background: #e5484d; color: #ffffff; }
+
+/* ---------------------------- 筛选 / 搜索 ---------------------------- */
+#filterBar {
+    background: #f3f5fa;
+    border-bottom: 1px solid #e4e9f2;
+}
+QPushButton#categoryChip {
+    background: #ffffff;
+    color: #5b6472;
+    border: 1px solid #dfe4ec;
+    border-radius: 16px;
+    padding: 6px 15px;
+    font-size: 9pt;
+}
+QPushButton#categoryChip:hover {
+    border-color: #a5b4fc;
+    color: #4f46e5;
+    background: #f5f6ff;
+}
+QPushButton#categoryChip:checked {
+    background: #4f46e5;
+    color: #ffffff;
+    border-color: #4f46e5;
+    font-weight: 700;
+}
+
+#searchBox {
+    background: #ffffff;
+    border: 1px solid #dfe4ec;
+    border-radius: 10px;
+    padding: 0 12px;
+    font-size: 10pt;
+    color: #1f2430;
+    selection-background-color: #4f46e5;
+    selection-color: #ffffff;
+}
+#searchBox:hover { border-color: #a5b4fc; }
+#searchBox:focus { border-color: #4f46e5; }
+
+#sectionHeader {
+    color: #374151;
+    font-size: 10.5pt;
+    font-weight: 700;
+    padding: 4px 2px;
+}
+
+/* ---------------------------- 组件卡片 ---------------------------- */
+#cardsScroll { border: none; background: transparent; }
+#cardsWrap { background: transparent; }
+
+/* 卡片外观（背景/边框/hover 光晕）由 ComponentCard.paintEvent 自绘：
+   QSS 圆角边框无抗锯齿，150% 缩放下 1px 逻辑边框锯齿明显（见 widgets.py 注释） */
+#card {
+    background: transparent;
+    border: none;
+}
+#cardTitle {
+    color: #1f2430;
+    font-size: 10.5pt;
+    font-weight: 700;
+}
+#statusLabel {
+    font-size: 9pt;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 10px;
+    color: #6b7280;
+    background: #f1f3f8;
+}
+#statusLabel[state="ok"]   { color: #15803d; background: #e7f7ed; }
+#statusLabel[state="warn"] { color: #b45309; background: #fff5e6; }
+#statusLabel[state="idle"] { color: #b91c1c; background: #fdecec; }
+
+#fieldLabel { color: #6b7280; font-size: 9pt; }
+#dirHint { color: #9aa1ad; font-size: 9pt; }
+
+/* ---------------------------- 输入框 / 下拉框 ---------------------------- */
+QLineEdit {
+    background: #ffffff;
+    border: 1px solid #dfe4ec;
+    border-radius: 10px;
+    padding: 6px 10px;
+    selection-background-color: #4f46e5;
+    selection-color: #ffffff;
+}
+QLineEdit:focus { border-color: #4f46e5; }
+
+QComboBox {
+    padding: 0 34px 0 12px;
+    border: 1px solid #dfe4ec;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #1f2430;
+    font-size: 10pt;
+    min-height: 34px;
+}
+QComboBox:hover { border-color: #a5b4fc; }
+QComboBox:focus, QComboBox:on { border-color: #4f46e5; }
+QComboBox QLineEdit {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    font-size: 10pt;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 30px;
+    border: none;
+    background: transparent;
+}
+QComboBox::down-arrow { image: none; width: 0; height: 0; }
+#comboArrow {
+    color: #8b94a3;
+    font-size: 10pt;
+    background: transparent;
+    border: none;
+    padding-right: 8px;
+}
+QComboBox:hover #comboArrow, QComboBox:focus #comboArrow { color: #4f46e5; }
+
+QComboBox QAbstractItemView {
+    border: 1px solid #e2e7f0;
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 6px;
+    outline: 0;
+}
+QComboBox QAbstractItemView::item {
+    padding: 8px 14px;
+    border-radius: 8px;
+    min-height: 26px;
+    color: #1f2430;
+}
+QComboBox QAbstractItemView::item:hover { background: #f0f2ff; color: #3730a3; }
+QComboBox QAbstractItemView::item:selected { background: #4f46e5; color: #ffffff; }
+
+/* ---------------------------- 按钮 ---------------------------- */
+QPushButton#primaryBtn {
+    background: #4f46e5;
+    color: #ffffff;
+    border: none;
+    padding: 7px 18px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 10pt;
+}
+QPushButton#primaryBtn:hover { background: #4338ca; }
+QPushButton#primaryBtn:pressed { background: #3730a3; }
+QPushButton#primaryBtn:disabled { background: #cbd5e1; color: #f1f5f9; }
+
+QPushButton#secondaryBtn {
+    background: #ffffff;
+    color: #374151;
+    border: 1px solid #d3dae4;
+    padding: 6px 16px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 10pt;
+}
+QPushButton#secondaryBtn:hover { background: #f3f5f8; border-color: #8f9aa8; }
+QPushButton#secondaryBtn:pressed { background: #e8ebf0; }
+QPushButton#secondaryBtn:disabled { color: #b6bec9; border-color: #e2e7f0; background: #f8fafc; }
+
+/* 设置弹窗里的行内小按钮（浏览/重置/打开/立即清理/检查更新） */
+QPushButton#miniBtn {
+    background: #ffffff;
+    color: #374151;
+    border: 1px solid #d3dae4;
+    padding: 2px 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 9.5pt;
+}
+QPushButton#miniBtn:hover { background: #f3f5f8; border-color: #8f9aa8; }
+QPushButton#miniBtn:pressed { background: #e8ebf0; }
+QPushButton#miniBtn:disabled { color: #b6bec9; border-color: #e2e7f0; background: #f8fafc; }
+
+QPushButton#dangerBtn {
+    background: #ffffff;
+    color: #dc2626;
+    border: 1px solid #fca5a5;
+    padding: 6px 16px;
+    border-radius: 10px;
+    font-size: 10pt;
+}
+QPushButton#dangerBtn:hover { background: #fef2f2; border-color: #dc2626; }
+QPushButton#dangerBtn:disabled { color: #e5b3b3; border-color: #f1d5d5; }
+
+/* ---------------------------- 进度条 ---------------------------- */
+QProgressBar {
+    background: #eef1f7;
+    border: none;
+    border-radius: 7px;
+    height: 12px;
+    text-align: center;
+    color: #4b5563;
+    font-size: 8pt;
+}
+QProgressBar::chunk {
+    border-radius: 7px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #6366f1, stop:1 #22d3ee);
+}
+
+/* ---------------------------- 日志 / 状态栏 ---------------------------- */
+#logWrap { background: transparent; }
+#logView {
+    background: #171b26;
+    color: #cfd6e4;
+    border: 1px solid #232a3a;
+    border-radius: 12px;
+    padding: 8px;
+    font-family: Menlo, Consolas, "Cascadia Mono", "Courier New", monospace;
+    font-size: 9pt;
+}
+#statusBar {
+    background: #eef1f7;
+    color: #6b7280;
+    font-size: 9pt;
+    border-top: 1px solid #e4e9f2;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+/* ---------------------------- 滚动条 ---------------------------- */
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 4px 2px;
+}
+QScrollBar::handle:vertical {
+    background: #cbd2df;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover { background: #a9b2c3; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px 4px;
+}
+QScrollBar::handle:horizontal {
+    background: #cbd2df;
+    border-radius: 5px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover { background: #a9b2c3; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+
+/* ---------------------------- 菜单 ---------------------------- */
+QMenu {
+    background: #ffffff;
+    border: 1px solid #e2e7f0;
+    border-radius: 12px;
+    padding: 6px;
+}
+QMenu::item { padding: 7px 18px; border-radius: 8px; }
+QMenu::item:selected { background: #f0f2ff; color: #3730a3; }
+
+/* ---------------------------- 对话框 ---------------------------- */
+#aboutDialog, #workspaceDialog {
+    background: #f5f7fb;
+}
+#aboutCard {
+    background: #ffffff;
+    border: 1px solid #e8ecf3;
+    border-radius: 14px;
+}
+QDialog QLabel { background: transparent; }
+QDialog QCheckBox { background: transparent; spacing: 8px; padding: 4px 2px; }
+QDialog QPushButton#primaryBtn, QDialog QPushButton#secondaryBtn { min-width: 76px; }
+/* 带滚动容器的对话框：内容层背景与对话框一致，避免出现灰白条带 */
+#workspaceDialog QScrollArea, #aboutDialog QScrollArea,
+#workspaceDialog QScrollArea > QWidget > QWidget,
+#aboutDialog QScrollArea > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+QGroupBox {
+    background: #ffffff;
+    border: 1px solid #e6eaf2;
+    border-radius: 12px;
+    /* margin-top 必须大于标题行高，否则标题文字压进卡片圆角边框 */
+    margin-top: 20px;
+    padding: 10px 12px 10px;
+    font-weight: 700;
+    color: #374151;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 14px;
+    top: 0px;
+    padding: 0 6px;
+}
+
+/* ---------------------------- 关于我们 ---------------------------- */
+#aboutLogo { padding: 2px; }
+
+#aboutTitle    { font-size: 17pt; font-weight: 700; color: #171b26; }
+#aboutSubtitle { font-size: 10.5pt; color: #8a91a0; }
+#aboutHeading  { font-size: 12.5pt; font-weight: 700; color: #1f2430; }
+#aboutText     { font-size: 10pt; color: #5c6474; line-height: 150%; }
+#aboutFoot     { font-size: 9pt; color: #9aa1b0; }
+
+/* ---------------------------- 工作空间 ---------------------------- */
+#dialogTip  { font-size: 10pt; color: #5c6474; }
+#pathValue  { color: #1f2430; }
+#pathMuted  { color: #6b7280; }
+#pathName   { color: #1f2430; font-weight: 700; }
